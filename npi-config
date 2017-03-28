@@ -1,0 +1,666 @@
+#!/bin/sh
+# Part of npi-config http://github.com/friendlyarm/npi-config
+#
+# See LICENSE file for copyright and license details
+
+INTERACTIVE=True
+ASK_TO_REBOOT=0
+
+if [ -f /etc/friendlyelec-release ]; then
+  # get friendlyelec's boardt model
+  # example: 
+  # BOARD="NanoPC-T2"
+  # LINUXFAMILY=nanopi2
+  . /etc/friendlyelec-release                       
+fi
+
+calc_wt_size() {
+  # NOTE: it's tempting to redirect stderr to /dev/null, so supress error 
+  # output from tput. However in this case, tput detects neither stdout or 
+  # stderr is a tty and so only gives default 80, 24 values
+  WT_HEIGHT=17
+  WT_WIDTH=$(tput cols)
+
+  if [ -z "$WT_WIDTH" ] || [ "$WT_WIDTH" -lt 60 ]; then
+    WT_WIDTH=80
+  fi
+  if [ "$WT_WIDTH" -gt 178 ]; then
+    WT_WIDTH=120
+  fi
+  WT_MENU_HEIGHT=$(($WT_HEIGHT-7))
+}
+
+#
+# begin
+# turn-wifi-into-apmode shell functions
+#
+
+FA_RunCmd() {
+  [ "$V" = "1" ] && echo "+ ${@}"
+  eval $@ || return $?
+}
+
+
+emptyfile() {
+  rm -f $1
+  touch $1
+  chmod $2 $1
+  chown root:root $1
+}
+
+init_wifi_ap() {
+  echo "options bcmdhd op_mode=2" > /etc/modprobe.d/bcmdhd.conf
+  FA_RunCmd rmmod bcmdhd
+  sleep 1
+  cp -f /usr/share/network-conf/ap/interfaces /etc/network/interfaces
+  cp -f /usr/share/network-conf/ap/hostapd_new.conf /etc/hostapd/hostapd.conf
+  FA_RunCmd modprobe bcmdhd op_mode=2
+  sleep 2
+  return 0
+}
+
+init_wifi_net() {
+  echo "options bcmdhd op_mode=5" > /etc/modprobe.d/bcmdhd.conf
+  FA_RunCmd rmmod bcmdhd
+  sleep 1
+  cp -f /usr/share/network-conf/sta/interfaces /etc/network/interfaces
+  rm -f /etc/hostapd/hostapd.conf
+  FA_RunCmd modprobe bcmdhd
+  sleep 3
+  return 0
+}
+
+APSSID=""
+APPASSWORD=""
+APPASSWORD2=""
+
+pre_apmode() {
+  APSSID=$(whiptail --inputbox "Enter Hotspot name (SSID)" 20 60 "friendlyelec-wifiap" 3>&1 1>&2 2>&3)
+  if [ $? -ne 0 ]; then
+    return 1
+  fi
+  
+  if [ -z "$APSSID" ]; then
+      whiptail --msgbox "Hotspot name cannot be blank." 20 60 1                                
+      return 1
+  fi
+
+  if [ ${#APSSID} -le 3 ]; then   
+      whiptail --msgbox "Hotspot name is too short." 20 60 1                                
+      return 1
+  fi
+
+  APPASSWORD=$(whiptail --inputbox "Enter password (9 characters long)" 20 60 "123456789" 3>&1 1>&2 2>&3)
+  if [ $? -ne 0 ]; then
+    return 1
+  fi
+
+  if [ -z "${APPASSWORD}" ]; then
+    whiptail --msgbox "Password cannot be blank." 20 60 1                                
+    return 1
+  fi
+
+  if [ ${#APPASSWORD} -le 8 ]; then
+    whiptail --msgbox "Password is too short, 9 characters long is better." 20 60 1
+    return 1                                                                       
+  fi
+
+  APPASSWORD2=$(whiptail --inputbox "Enter password again" 20 60 "123456789" 3>&1 1>&2 2>&3)
+  if [ $? -ne 0 ]; then
+    return 1
+  fi
+
+  if [ -z "${APPASSWORD2}" ]; then
+    whiptail --msgbox "Password2 cannot be blank." 20 60 1
+    return 1 
+  fi
+
+  if [ x"${APPASSWORD}" = x"${APPASSWORD2}" ]; then
+    cp -f /usr/share/network-conf/ap/hostapd.conf /usr/share/network-conf/ap/hostapd_new.conf
+    sed -i "s/^ssid=.*/ssid=$APSSID/g" /usr/share/network-conf/ap/hostapd_new.conf
+    sed -i "s/^wpa_passphrase.*/wpa_passphrase="${APPASSWORD}"/g" /usr/share/network-conf/ap/hostapd_new.conf
+  else
+    whiptail --msgbox "The two password didn't match." 20 60 1
+    return 1
+  fi
+  return 0
+}
+
+end_apmode() {
+    whiptail --msgbox "Configuration Saved!\nYou can connect your computer to this board now, \nhotspot detail:\n\nWireless Name: $APSSID\nPassword: $APPASSWORD\n\n"  20 60 1
+}
+
+switch_apmode() {
+  pre_apmode
+  if [ $? -ne 0 ]; then
+    return 0
+  fi
+
+  FA_RunCmd ifdown wlan0
+  sleep 1
+  FA_RunCmd ifconfig wlan0 down
+  init_wifi_ap
+  FA_RunCmd systemctl stop dnsmasq
+  FA_RunCmd systemctl stop hostapd
+  FA_RunCmd systemctl stop udhcpd.service
+  FA_RunCmd systemctl enable udhcpd.service
+  FA_RunCmd systemctl enable dnsmasq
+  FA_RunCmd systemctl enable hostapd
+  sed -i 's/DHCPD_ENABLED="no"/DHCPD_ENABLED="yes"/g' /etc/default/udhcpd
+  if [ -f /etc/wicd/wireless-settings.conf ]; then
+    cp /etc/wicd/wireless-settings.conf /etc/wicd/wireless-settings.conf.bak
+    emptyfile /etc/wicd/wireless-settings.conf 600
+  fi
+  if [ -f /etc/network/interfaces.d/wlan0 ]; then
+  cp /etc/network/interfaces.d/wlan0 /etc/wlan0-bak
+  rm /etc/network/interfaces.d/wlan0
+  fi
+  FA_RunCmd systemctl start udhcpd.service
+  FA_RunCmd systemctl start dnsmasq
+  FA_RunCmd systemctl start hostapd
+  FA_RunCmd /sbin/ifconfig wlan0 192.168.8.1 up
+  end_apmode
+  return 0
+}
+
+exit_apmode() {
+    FA_RunCmd ifdown wlan0
+    sleep 1
+    FA_RunCmd ifconfig wlan0 down
+    FA_RunCmd systemctl stop dnsmasq
+    FA_RunCmd systemctl stop hostapd
+    FA_RunCmd systemctl stop udhcpd.service
+    FA_RunCmd systemctl disable dnsmasq
+    FA_RunCmd systemctl disable hostapd
+    FA_RunCmd systemctl disable udhcpd.service
+    sed -i 's/DHCPD_ENABLED="yes"/DHCPD_ENABLED="no"/g' /etc/default/udhcpd
+    init_wifi_net
+    sleep 2
+    return 0
+}
+
+#
+# end
+#
+
+
+
+do_about() {
+  whiptail --msgbox "\
+This tool provides a straight-forward way of doing initial
+configuration of the NanoPi. Although it can be run
+at any time, some of the options may have difficulties if
+you have heavily customised your installation.\
+" 20 70 1
+}
+
+do_change_pass() {
+  id -u pi
+  RET=$?
+  if [ $RET -eq 0 ]; then
+    whiptail --msgbox "You will now be asked to enter a new password for the pi user" 20 60 1
+    passwd pi &&
+    whiptail --msgbox "Password changed successfully" 20 60 1
+    return 0
+  fi
+
+  id -u fa
+  RET=$?
+  if [ $RET -eq 0 ]; then
+    whiptail --msgbox "You will now be asked to enter a new password for the fa user" 20 60 1
+    passwd fa &&
+    whiptail --msgbox "Password changed successfully" 20 60 1
+    return 0
+  fi
+}
+
+do_configure_keyboard() {
+  dpkg-reconfigure keyboard-configuration &&
+  printf "Reloading keymap. This may take a short while\n" &&
+  invoke-rc.d keyboard-setup start
+}
+
+do_change_locale() {
+  dpkg-reconfigure locales
+  ASK_TO_REBOOT=1
+}
+
+do_change_timezone() {
+  dpkg-reconfigure tzdata
+}
+
+get_wifi_country() {
+   grep country= /etc/wpa_supplicant/wpa_supplicant.conf | cut -d "=" -f 2
+}
+
+do_wifi_country() {
+  oIFS="$IFS"
+  if [ "$INTERACTIVE" = True ]; then
+    IFS="/"
+    value=$(cat /usr/share/zoneinfo/iso3166.tab | tail -n +26 | tr '\t' '/' | tr '\n' '/')
+    COUNTRY=$(whiptail --menu "Select the country in which the Pi is to be used" 20 60 10 ${value} 3>&1 1>&2 2>&3)
+  else
+    COUNTRY=$1
+    true
+  fi
+  if [ $? -eq 0 ];then
+    if [ -e /etc/wpa_supplicant/wpa_supplicant.conf ]; then
+        if grep -q "^country=" /etc/wpa_supplicant/wpa_supplicant.conf ; then
+            sed -i "s/^country=.*/country=$COUNTRY/g" /etc/wpa_supplicant/wpa_supplicant.conf
+        else
+            sed -i "1i country=$COUNTRY" /etc/wpa_supplicant/wpa_supplicant.conf
+        fi
+    else
+        echo "country=$COUNTRY" > /etc/wpa_supplicant/wpa_supplicant.conf
+    fi
+    if [ "$INTERACTIVE" = True ]; then
+        whiptail --msgbox "Wi-fi country set to $COUNTRY" 20 60 1
+    fi
+    ASK_TO_REBOOT=1
+  fi
+  IFS=$oIFS
+}
+
+do_change_hostname() {
+  whiptail --msgbox "\
+Please note: RFCs mandate that a hostname's labels \
+may contain only the ASCII letters 'a' through 'z' (case-insensitive), 
+the digits '0' through '9', and the hyphen.
+Hostname labels cannot begin or end with a hyphen. 
+No other symbols, punctuation characters, or blank spaces are permitted.\
+" 20 70 1
+
+  CURRENT_HOSTNAME=`cat /etc/hostname | tr -d " \t\n\r"`
+  NEW_HOSTNAME=$(whiptail --inputbox "Please enter a hostname" 20 60 "$CURRENT_HOSTNAME" 3>&1 1>&2 2>&3)
+  if [ $? -eq 0 ]; then
+    echo $NEW_HOSTNAME > /etc/hostname
+    sed -i "s/127.0.1.1.*$CURRENT_HOSTNAME/127.0.1.1\t$NEW_HOSTNAME/g" /etc/hosts
+    ASK_TO_REBOOT=1
+  fi
+}
+
+do_ssh() {
+  if [ -e /var/log/regen_ssh_keys.log ] && ! grep -q "^finished" /var/log/regen_ssh_keys.log; then
+    whiptail --msgbox "Initial ssh key generation still running. Please wait and try again." 20 60 2
+    return 1
+  fi
+  DEFAULT=--defaultno
+  if [ $(get_ssh) -eq 0 ]; then
+    DEFAULT=
+  fi
+  if [ "$INTERACTIVE" = True ]; then
+    whiptail --yesno "Would you like the SSH server to be enabled?" $DEFAULT 20 60 2
+    RET=$?
+  else
+    RET=$1
+  fi
+  if [ $RET -eq 0 ]; then
+    update-rc.d ssh enable &&
+    invoke-rc.d ssh start &&
+    STATUS=enabled
+  elif [ $RET -eq 1 ]; then
+    update-rc.d ssh disable &&
+    invoke-rc.d ssh stop &&
+    STATUS=disabled
+  else
+    return $RET
+  fi
+  if [ "$INTERACTIVE" = True ]; then
+    whiptail --msgbox "The SSH server is $STATUS" 20 60 1
+  fi
+}
+
+do_console() {
+  sed /etc/systemd/system/getty@tty1.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\) --autologin pi/\1/g"
+  sed /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\) --autologin pi/\1/g"
+  sed /etc/systemd/system/serial-getty@ttyAMA0.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\) --autologin pi/\1/g"
+  sed /etc/systemd/system/serial-getty@ttySAC0.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\) --autologin pi/\1/g"
+}
+
+do_autologin_console() {
+  do_console
+
+  sed /etc/systemd/system/getty@tty1.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\)/\1 --autologin pi/g"
+  sed /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\)/\1 --autologin pi/g"
+  sed /etc/systemd/system/serial-getty@ttyAMA0.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\)/\1 --autologin pi/g"
+  sed /etc/systemd/system/serial-getty@ttySAC0.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\)/\1 --autologin pi/g"
+}
+
+do_boot_behaviour() {
+
+  # if [ ! -d "/opt/QtE-Demo" ]; then
+  #  whiptail --msgbox "This OS is't UbuntuCore with QtE, I don't know how to configure." 20 60 2
+  #  return 0
+  # fi
+  # "Qt/Embedded" "Graphical UI, display system info" \
+
+  BOOTOPT=$(whiptail --menu "Chose boot option" 20 60 10 \
+    "Console" "Text console, requiring login (default)" \
+    "Console (auto)" "Login to text console as pi user" \
+    3>&1 1>&2 2>&3)
+  if [ $? -eq 0 ]; then
+    case "$BOOTOPT" in
+      Console) do_console ;;
+#        sed /etc/rc.local -i -e "s/^\/opt\/QtE-Demo\/run.sh/#\/opt\/QtE-Demo\/run.sh/g"
+#        rm /etc/systemd/system/getty.target.wants/getty@tty2.service
+#        ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty1.service
+ #     Qt\ *)
+#        sed /etc/rc.local -i -e "s/^#\/opt\/QtE-Demo\/run.sh/\/opt\/QtE-Demo\/run.sh/g"
+#        rm /etc/systemd/system/getty.target.wants/getty@tty1.service
+#        ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty2.service
+#        ;;
+      Console\ *) do_autologin_console ;;
+      *)
+        whiptail --msgbox "Programmer error, unrecognised boot option" 20 60 2
+        return 1
+        ;;
+    esac
+    ASK_TO_REBOOT=1
+  fi
+}
+
+do_audio() {
+  AUDIO_OUT=$(whiptail --menu "Choose the audio output" 20 60 10 \
+    "0" "Auto" \
+    "1" "Force 3.5mm ('headphone') jack" \
+    "2" "Force HDMI" \
+    3>&1 1>&2 2>&3)
+
+  if [ $? -eq 0 ]; then
+    CARDNUM=0
+
+    if [ ${AUDIO_OUT} -eq 1 ]; then
+      CARDNUM=0
+    fi
+
+    if [ ${AUDIO_OUT} -eq 2 ]; then
+      CARDNUM=1
+    fi
+
+    cat >/etc/asound.conf <<EOL
+pcm.!default {
+    type hw
+    card ${CARDNUM}
+    device 0
+}
+
+ctl.!default {
+    type hw
+    card ${CARDNUM}
+}
+EOL
+    whiptail --yesno "Would you like to reload alsa now?" 20 60 2
+    if [ $? -eq 0 ]; then # yes
+      alsa force-reload
+    fi
+  fi
+}
+
+do_set_up_wifi_hotspot() {
+  wlan=`ifconfig wlan0`
+  if [ $? -eq 0 ]; then
+      WIFI_MODE=$(whiptail --menu "Choose the WiFi mode" 20 60 10 \
+    "W0" "Run as Access point (AP mode)" \
+    "W1" "Run as Wireless LAN client (Station mode)" \
+    3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -eq 1 ]; then
+      return 0
+    elif [ $RET -eq 0 ]; then
+      case "$WIFI_MODE" in
+        W0) switch_apmode ;;
+        W1) exit_apmode ;;
+        *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+      esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+    fi
+  else
+    whiptail --msgbox "No WLAN devices found." 20 60 1
+  fi
+}
+
+do_finish() {
+  if [ $ASK_TO_REBOOT -eq 1 ]; then
+    whiptail --yesno "Would you like to reboot now?" 20 60 2
+    if [ $? -eq 0 ]; then # yes
+      sync
+      reboot
+    fi
+  fi
+  exit 0
+}
+
+#if [ "GET" = "${OPT_MEMORY_SPLIT:-}" ]; then
+#  set -u # Fail on unset variables
+#  get_current_memory_split
+#  echo $CURRENT_MEMSPLIT
+#  exit 0
+#fi
+
+# Everything else needs to be run as root
+if [ $(id -u) -ne 0 ]; then
+  printf "Script must be run as root. Try 'sudo npi-config'\n"
+  exit 1
+fi
+
+do_internationalisation_menu() {
+  FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Internationalisation Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "I1 Change Locale" "Set up language and regional settings to match your location" \
+    "I2 Change Timezone" "Set up timezone to match your location" \
+    "I3 Change Keyboard Layout" "Set the keyboard layout to match your keyboard" \
+    "I4 Change Wi-fi Country" "Set the legal channels used in your country" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return 0
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      I1\ *) do_change_locale ;;
+      I2\ *) do_change_timezone ;;
+      I3\ *) do_configure_keyboard ;;
+      I4\ *) do_wifi_country ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+  fi
+}
+
+do_connect_wifi() {
+  wlan=`ifconfig wlan0`
+  if [ $? -ne 0 ]; then
+    whiptail --msgbox "No WLAN devices found." 20 60 1
+    return 0
+  fi
+
+  if [ -f /sys/module/bcmdhd/parameters/op_mode ]; then
+    wifimod=`cat /sys/module/bcmdhd/parameters/op_mode`
+    if [ $wifimod -eq 2 ]; then 
+      whiptail --msgbox "The WiFi is working in AP mode, you need switch to station mode first." 20 60 1
+      do_set_up_wifi_hotspot
+      return 0
+    elif [ $wifimod -eq 5 ]; then
+      echo "station mode"
+    else
+      whiptail --msgbox "Unknow WiFi mode: ${wifimod}" 20 60 1
+      return 0
+    fi
+  else
+    whiptail --msgbox "Unsupported WiFi module." 20 60 1
+    return 0
+  fi
+
+  SSID=$(whiptail --inputbox "Enter network name (SSID)" 20 60 "" 3>&1 1>&2 2>&3)
+  if [ $? -ne 0 ]; then
+    return 0
+  fi
+  
+  if [ -z "$SSID" ]; then
+      whiptail --msgbox "Network name cannot be blank." 20 60 1                                
+      return 0
+  fi
+
+  if [ ${#SSID} -le 3 ]; then   
+      whiptail --msgbox "Network name is too short." 20 60 1                                
+      return 0
+  fi
+  
+  PASSWORD=$(whiptail --inputbox "Enter password (Network name: ${SSID})" 20 60 "" 3>&1 1>&2 2>&3)
+  if [ $? -ne 0 ]; then
+    return 0
+  fi
+
+  if [ -z "${PASSWORD}" ]; then
+      whiptail --msgbox "Password cannot be blank." 20 60 1                                
+      return 0
+  else
+    if [ ${#PASSWORD} -le 4 ]; then                                   
+        whiptail --msgbox "Password is too short." 20 60 1  
+        return 0                                              
+    fi
+
+    PASSWORD2=$(whiptail --inputbox "Enter password again (Network name: ${SSID})" 20 60 "" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ]; then
+      return 0
+    fi
+
+    if [ -z "${PASSWORD2}" ]; then
+        whiptail --msgbox "Password cannot be blank." 20 60 1  
+        return 0
+    fi
+
+    if [ x"${PASSWORD}" = x"${PASSWORD2}" ]; then
+      cat >/etc/wpa_supplicant/wpa_supplicant.conf <<EOL
+update_config=1
+network={
+    ssid="${SSID}"
+    psk="${PASSWORD}"
+}
+EOL
+      whiptail --msgbox "Configuration saved, you may need to reboot device to apply these changes." 20 60 1 
+      ASK_TO_REBOOT=1
+    else
+        whiptail --msgbox "The two password didn't match. p1=${PASSWORD}, p2=${PASSWORD2}" 20 60 1  
+        return 0
+    fi
+  fi
+}
+
+do_wifi_menu() {
+  FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Wireless settings" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "A1 Connect to a WiFi Network" "" \
+    "A2 Configure Wi-Fi hotspot" "" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return 0
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      A1\ *) do_connect_wifi ;;
+      A2\ *) do_set_up_wifi_hotspot ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+  fi
+}
+
+do_welcome_message() {
+  whiptail --yesno "Would you like the welcome message enabled or disabled?" 20 60 2 \
+    --yes-button Enable --no-button Disable
+  RET=$?
+  if [ $RET -eq 0 ]; then
+    sed /etc/pam.d/sshd -i -e "s/^#\s*\(session.*pam_motd.so\)/\1/g"
+    sed /etc/pam.d/login -i -e "s/^#\s*\(session.*pam_motd.so\)/\1/g"
+    whiptail --msgbox "Welcome message enabled" 20 60 1
+  elif [ $RET -eq 1 ]; then
+    sed /etc/pam.d/sshd -i -e "s/^\s*\(session.*pam_motd.so\)/# \1/g"
+    sed /etc/pam.d/login -i -e "s/^\s*\(session.*pam_motd.so\)/# \1/g"
+    whiptail --msgbox "Welcome message disabled" 20 60 1
+  else
+    return $RET
+  fi
+}
+
+
+#    "P2 Wireless Settings" "Connect to router, or enable AP mode" \
+#      P2\ *) do_wifi_menu;;
+
+do_interface_menu() {
+  FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Interfacing Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "P1 SSH" "Enable/Disable remote command line access to your Pi using SSH" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return 0
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      P1\ *) do_ssh ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+  fi
+}
+do_advanced_menu() {
+  FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "A1 Audio" "Force audio out through HDMI or 3.5mm jack" \
+    "A2 Welcome message" "Disable/Enable Linux welcome message" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return 0
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      A1\ *) do_audio ;;
+      A2\ *) do_welcome_message ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+  fi
+}
+
+
+do_update() {
+  cd /tmp/
+  rm -rf npi-config
+  git clone https://github.com/friendlyarm/npi-config
+  if [ $? -eq 0 ]; then
+    SELFPATH=`which npi-config`
+    cp -f npi-config/npi-config $SELFPATH
+    chmod 755 $SELFPATH
+    rm -fr npi-config
+    printf "Sleeping 5 seconds before reloading npi-config\n" &&
+    sleep 5 &&
+    exec $SELFPATH
+  else
+    whiptail --msgbox "There was an error checking new version." 20 60 1
+  fi
+}
+
+#
+# Interactive use loop
+#
+calc_wt_size
+while true; do
+  FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Setup Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Finish --ok-button Select \
+    "1 Change User Password" "Change password for the default user (pi)" \
+    "2 Hostname" "Set the visible name for this Pi on a network" \
+    "3 Boot Options" "Configure options for start-up" \
+    "4 Localisation Options" "Set up language and regional settings to match your location" \
+    "5 Interfacing Options" "Configure connections to peripherals" \
+    "6 Advanced Options" "Configure advanced settings" \
+    "7 Update" "Update this tool to the latest version" \
+    "8 About npi-config" "Information about this configuration tool" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    do_finish
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      1\ *) do_change_pass ;;
+      2\ *) do_change_hostname ;;
+      3\ *) do_boot_behaviour ;;
+      4\ *) do_internationalisation_menu ;;
+      5\ *) do_interface_menu ;;
+      6\ *) do_advanced_menu ;;
+      7\ *) do_update ;;
+      8\ *) do_about ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+  else
+    exit 1
+  fi
+done
