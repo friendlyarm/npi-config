@@ -14,6 +14,17 @@ if [ -f /etc/friendlyelec-release ]; then
   . /etc/friendlyelec-release                       
 fi
 
+get_init_sys() {
+  if command -v systemctl > /dev/null && systemctl | grep -q '\-\.mount'; then
+    SYSTEMD=1
+  elif [ -f /etc/init.d/cron ] && [ ! -h /etc/init.d/cron ]; then
+    SYSTEMD=0
+  else
+    echo "Unrecognised init system"
+    return 1
+  fi
+}
+
 calc_wt_size() {
   # NOTE: it's tempting to redirect stderr to /dev/null, so supress error 
   # output from tput. However in this case, tput detects neither stdout or 
@@ -326,6 +337,69 @@ do_autologin_console() {
   sed /etc/systemd/system/serial-getty@ttySAC0.service.d/autologin.conf -i -e "s/\(^ExecStart.*agetty\)/\1 --autologin pi/g"
 }
 
+do_qte() {
+  whiptail --yesno "Would you like the Qt/E Demo enabled or disabled?" 20 60 2 \
+    --yes-button Enable --no-button Disable
+  RET=$?
+  if [ $RET -eq 0 ]; then
+    sed /etc/rc.local -i -e "s/^#\/opt\/QtE-Demo\/run.sh/\/opt\/QtE-Demo\/run.sh/g"
+    rm /etc/systemd/system/getty.target.wants/getty@tty1.service
+    ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty2.service
+    whiptail --msgbox "Qt/E Demo enabled" 20 60 1
+  elif [ $RET -eq 1 ]; then
+    sed /etc/rc.local -i -e "s/^\/opt\/QtE-Demo\/run.sh/#\/opt\/QtE-Demo\/run.sh/g"
+    rm /etc/systemd/system/getty.target.wants/getty@tty2.service
+    ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty1.service
+    whiptail --msgbox "Qt/E Demo disabled" 20 60 1
+  else
+    return $RET
+  fi
+}
+
+get_boot_wait() {
+  if test -e /etc/systemd/system/dhcpcd.service.d/wait.conf; then
+    echo 0
+  else
+    echo 1
+  fi
+}
+
+do_boot_wait() {
+  get_init_sys
+  if [ $SYSTEMD -eq 0 ]; then
+    whiptail --msgbox "This option can only be selected when using systemd" 20 60 2
+    return 1
+  fi
+
+  DEFAULT=--defaultno
+  if [ $(get_boot_wait) -eq 0 ]; then
+    DEFAULT=
+  fi
+  if [ "$INTERACTIVE" = True ]; then
+    whiptail --yesno "Would you like boot to wait until a network connection is established?" $DEFAULT 20 60 2
+    RET=$?
+  else
+    RET=$1
+  fi
+  if [ $RET -eq 0 ]; then
+    mkdir -p /etc/systemd/system/dhcpcd.service.d/
+    cat > /etc/systemd/system/dhcpcd.service.d/wait.conf << EOF
+[Service]
+ExecStart=
+ExecStart=/sbin/dhcpcd -q -w
+EOF
+    STATUS=enabled
+  elif [ $RET -eq 1 ]; then
+    rm -f /etc/systemd/system/dhcpcd.service.d/wait.conf
+    STATUS=disabled
+  else
+    return $RET
+  fi
+  if [ "$INTERACTIVE" = True ]; then
+    whiptail --msgbox "Waiting for network on boot is $STATUS" 20 60 1
+  fi
+}
+
 do_boot_behaviour() {
 
   # if [ ! -d "/opt/QtE-Demo" ]; then
@@ -335,21 +409,15 @@ do_boot_behaviour() {
   # "Qt/Embedded" "Graphical UI, display system info" \
 
   BOOTOPT=$(whiptail --menu "Chose boot option" 20 60 10 \
-    "Console" "Text console, requiring login (default)" \
-    "Console (auto)" "Login to text console as pi user" \
+      "B1 Console" "Text console, requiring user to login" \
+      "B2 Console Autologin" "Text console, automatically logged in as 'pi' user" \
+      "B3 Qt/Embedded" "Disable or enable Qt/E demo auto startup" \
     3>&1 1>&2 2>&3)
   if [ $? -eq 0 ]; then
     case "$BOOTOPT" in
-      Console) do_console ;;
-#        sed /etc/rc.local -i -e "s/^\/opt\/QtE-Demo\/run.sh/#\/opt\/QtE-Demo\/run.sh/g"
-#        rm /etc/systemd/system/getty.target.wants/getty@tty2.service
-#        ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty1.service
- #     Qt\ *)
-#        sed /etc/rc.local -i -e "s/^#\/opt\/QtE-Demo\/run.sh/\/opt\/QtE-Demo\/run.sh/g"
-#        rm /etc/systemd/system/getty.target.wants/getty@tty1.service
-#        ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty2.service
-#        ;;
-      Console\ *) do_autologin_console ;;
+      B1*) do_console ;;
+      B2*) do_autologin_console ;;
+      B3*) do_qte ;;
       *)
         whiptail --msgbox "Programmer error, unrecognised boot option" 20 60 2
         return 1
@@ -361,7 +429,6 @@ do_boot_behaviour() {
 
 do_audio() {
   AUDIO_OUT=$(whiptail --menu "Choose the audio output" 20 60 10 \
-    "0" "Auto" \
     "1" "Force 3.5mm ('headphone') jack" \
     "2" "Force HDMI" \
     3>&1 1>&2 2>&3)
@@ -389,9 +456,10 @@ ctl.!default {
     card ${CARDNUM}
 }
 EOL
-    whiptail --yesno "Would you like to reload alsa now?" 20 60 2
+    whiptail --yesno "Would you like to restart ALSA now?" 20 60 2
     if [ $? -eq 0 ]; then # yes
       alsa force-reload
+      whiptail --msgbox "ALSA restart done." 20 60 1
     fi
   fi
 }
@@ -612,6 +680,23 @@ do_advanced_menu() {
   fi
 }
 
+do_boot_menu() {
+  FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Boot Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "B1 Autologin" "Choose how to boot into text console, autologin or requiring user" \
+    "B2 Wait for Network at Boot" "Choose whether to wait for network connection during boot" \
+    3>&1 1>&2 2>&3)
+
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return 0
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      B1\ *) do_boot_behaviour ;;
+      B2\ *) do_boot_wait ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+  fi
+}
 
 do_update() {
   cd /tmp/
@@ -652,7 +737,7 @@ while true; do
     case "$FUN" in
       1\ *) do_change_pass ;;
       2\ *) do_change_hostname ;;
-      3\ *) do_boot_behaviour ;;
+      3\ *) do_boot_menu ;;
       4\ *) do_internationalisation_menu ;;
       5\ *) do_interface_menu ;;
       6\ *) do_advanced_menu ;;
