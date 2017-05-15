@@ -645,6 +645,96 @@ do_welcome_message() {
   fi
 }
 
+do_get_dtb_status()
+{
+  local DTB=$1
+  local NODE=$2
+  RET=`fdtget ${DTB} ${NODE} status`
+  if [ "x${RET}" = "xokay" ]; then
+    echo "enabled"
+  else
+    echo "disabled"
+  fi
+}
+
+do_peripheral_status() {
+
+  local BOARD=`grep BOARD_NAME /etc/friendlyelec-release | cut -d "=" -f 2 | tr -d '"' | tr '[A-Z]' '[a-z]'`
+  local HARDWARE=`grep Hardware /proc/cpuinfo | cut -d ":" -f 2 | tr -d ' '`
+  local DTB="unknown"
+  if [ "x${HARDWARE}" = "xAllwinnersun50iw2Family" ]; then
+    DTB=sun50i-h5-${BOARD}.dtb
+  elif [ "x${HARDWARE}" = "xsun8i" ]; then
+    DTB=sun8i-h3-${BOARD}.dtb
+    if [ "x${BOARD}" = "xnanopi-duo" ]; then
+      DTB=sun8i-h2-plus-${BOARD}.dtb
+    fi
+  else
+    whiptail --msgbox "Unsupported board ${BOARD}" 20 60 1
+    return 1
+  fi
+  if [ ! -e /boot/${DTB} ]; then
+    whiptail --msgbox "${DTB} not found" 20 60 1
+    return 1
+  fi
+  if ! dpkg -s device-tree-compiler >/dev/null 2>&1; then
+    whiptail --msgbox "please apt-get install device-tree-compiler" 20 60 1
+    return 1
+  fi
+
+  local peripherals=$1
+  case ${peripherals} in
+  serial)
+    local serial0_status=`do_get_dtb_status /boot/${DTB} serial0 status`
+    local serial1_status=`do_get_dtb_status /boot/${DTB} serial1 status`
+    local serial2_status=`do_get_dtb_status /boot/${DTB} serial2 status`
+    local serial3_status=`do_get_dtb_status /boot/${DTB} serial3 status`
+    FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "${peripherals}0" "Enable/Disable ${peripherals}0[${serial0_status}]" \
+    "${peripherals}1" "Enable/Disable ${peripherals}1[${serial1_status}]" \
+    "${peripherals}2" "Enable/Disable ${peripherals}2[${serial2_status}]" \
+    "${peripherals}3" "Enable/Disable ${peripherals}3[${serial3_status}]" \
+    3>&1 1>&2 2>&3)
+    ;;
+  i2c)
+    local i2c0_status=`do_get_dtb_status /boot/${DTB} i2c0 status`
+    local i2c1_status=`do_get_dtb_status /boot/${DTB} i2c1 status`
+    local i2c2_status=`do_get_dtb_status /boot/${DTB} i2c2 status`
+    FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "${peripherals}0" "Enable/Disable ${peripherals}0[${i2c0_status}]" \
+    "${peripherals}1" "Enable/Disable ${peripherals}1[${i2c1_status}]" \
+    "${peripherals}2" "Enable/Disable ${peripherals}2[${i2c2_status}]" \
+    3>&1 1>&2 2>&3)
+    ;;
+  spi)
+    local spi0_status=`do_get_dtb_status /boot/${DTB} spi0 status`
+    local spi1_status=`do_get_dtb_status /boot/${DTB} spi1 status`
+    FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "${peripherals}0" "Enable/Disable ${peripherals}0[${spi0_status}]" \
+    "${peripherals}1" "Enable/Disable ${peripherals}1[${spi1_status}]" \
+    3>&1 1>&2 2>&3)
+    ;;
+  esac
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return 0
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      serial*|i2c*|spi*)
+              whiptail --yesno "Enable/Disable ${FUN} interface?" 20 60 2 \
+    --yes-button Enable --no-button Disable
+            RET=$? 
+            if [ $RET -eq 0 ]; then
+                fdtput --type s /boot/${DTB} ${FUN} status "okay" || whiptail --msgbox "Fail to enable $FUN" 20 60 1
+            else
+                fdtput --type s /boot/${DTB} ${FUN} status "disabled" || whiptail --msgbox "Fail to disable $FUN" 20 60 1
+            fi
+            ASK_TO_REBOOT=1
+            ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+  fi
+}
 
 #    "P2 Wireless Settings" "Connect to router, or enable AP mode" \
 #      P2\ *) do_wifi_menu;;
@@ -667,6 +757,9 @@ do_advanced_menu() {
   FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "A1 Audio" "Force audio out through HDMI or 3.5mm jack" \
     "A2 Welcome message" "Disable/Enable Linux welcome message" \
+    "A3 Serial" "Enable/Disable Serial" \
+    "A4 I2C" "Enable/Disable I2C" \
+    "A5 SPI" "Enable/Disable SPI" \
     3>&1 1>&2 2>&3)
   RET=$?
   if [ $RET -eq 1 ]; then
@@ -675,6 +768,9 @@ do_advanced_menu() {
     case "$FUN" in
       A1\ *) do_audio ;;
       A2\ *) do_welcome_message ;;
+      A3\ *) do_peripheral_status serial ;;
+      A4\ *) do_peripheral_status i2c ;;
+      A5\ *) do_peripheral_status spi ;;
       *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
     esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
   fi
