@@ -714,22 +714,38 @@ do_peripheral_status() {
     "${peripherals}1" "Enable/Disable ${peripherals}1[${spi1_status}]" \
     3>&1 1>&2 2>&3)
     ;;
+  pwm)
+    local pwm0_status=`do_get_dtb_status /boot/${DTB} pwm0 status`
+    FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "${peripherals}0" "Enable/Disable ${peripherals}0[${pwm0_status}]" \
+    3>&1 1>&2 2>&3)
+    ;;
   esac
   RET=$?
   if [ $RET -eq 1 ]; then
     return 0
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
-      serial*|i2c*|spi*)
+      serial*|i2c*|spi*|pwm*)
               whiptail --yesno "Enable/Disable ${FUN} interface?" 20 60 2 \
     --yes-button Enable --no-button Disable
             RET=$? 
             if [ $RET -eq 0 ]; then
                 fdtput --type s /boot/${DTB} ${FUN} status "okay" || whiptail --msgbox "Fail to enable $FUN" 20 60 1
+                # uart0 & pwm0 share same pin: GPIOA5
+                if [ "x${FUN}" = "xserial0" ]; then
+                  fdtput --type s /boot/${DTB} pwm0 status "disabled" || whiptail --msgbox "Fail to disable pwm0" 20 60 1
+                  sed -i 's/tty0/ttyS0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
+                elif [ "x${FUN}" = "xpwm0" ]; then
+                  fdtput --type s /boot/${DTB} serial0 status "disabled" || whiptail --msgbox "Fail to disable serial0" 20 60 1
+                  sed -i 's/ttyS0/tty0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
+                fi
             else
                 fdtput --type s /boot/${DTB} ${FUN} status "disabled" || whiptail --msgbox "Fail to disable $FUN" 20 60 1
             fi
             ASK_TO_REBOOT=1
+            sync
+            sleep 1
             ;;
       *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
     esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
@@ -760,6 +776,7 @@ do_advanced_menu() {
     "A3 Serial" "Enable/Disable Serial" \
     "A4 I2C" "Enable/Disable I2C" \
     "A5 SPI" "Enable/Disable SPI" \
+    "A6 PWM" "Enable/Disable PWM" \
     3>&1 1>&2 2>&3)
   RET=$?
   if [ $RET -eq 1 ]; then
@@ -771,6 +788,7 @@ do_advanced_menu() {
       A3\ *) do_peripheral_status serial ;;
       A4\ *) do_peripheral_status i2c ;;
       A5\ *) do_peripheral_status spi ;;
+      A6\ *) do_peripheral_status pwm ;;
       *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
     esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
   fi
