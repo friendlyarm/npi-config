@@ -730,8 +730,14 @@ do_peripheral_status() {
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
       serial*|i2c*|spi*|pwm*)
-              whiptail --yesno "Enable/Disable ${FUN} interface?" 20 60 2 \
-    --yes-button Enable --no-button Disable
+            if [ "x$FUN" = "xserial0" ]; then
+              local warning="WARNING: Enable serial0 will disable pwm0"
+            elif [ "x$FUN" = "xpwm0" ]; then
+              local warning="WARNING: Enable pwm0 will disable debug serial0"
+            fi
+            whiptail --yesno "Enable/Disable ${FUN} interface?\n${warning}" 20 60 2 \
+                  --yes-button Enable --no-button Disable
+
             RET=$? 
             if [ $RET -eq 0 ]; then
                 fdtput --type s /boot/${DTB} ${FUN} status "okay" || whiptail --msgbox "Fail to enable $FUN" 20 60 1
