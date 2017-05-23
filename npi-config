@@ -664,6 +664,7 @@ do_peripheral_status() {
   local BOARD=`grep BOARD_NAME /etc/friendlyelec-release | cut -d "=" -f 2 | tr -d '"' | tr '[A-Z]' '[a-z]'`
   local HARDWARE=`grep Hardware /proc/cpuinfo | cut -d ":" -f 2 | tr -d ' '`
   local DTB="unknown"
+  local ker_version=`uname -r`
   if [ "x${HARDWARE}" = "xAllwinnersun50iw2Family" ]; then
     DTB=sun50i-h5-${BOARD}.dtb
   elif [ "x${HARDWARE}" = "xsun8i" ]; then
@@ -672,8 +673,8 @@ do_peripheral_status() {
       DTB=sun8i-h2-plus-${BOARD}.dtb
     fi
   else
-    whiptail --msgbox "Unsupported board ${BOARD}" 20 60 1
-    return 1
+    whiptail --msgbox "Unsupported ${BOARD} with Linux-${ker_version}" 20 60 1
+    return 0
   fi
   if [ ! -e /boot/${DTB} ]; then
     whiptail --msgbox "${DTB} not found" 20 60 1
