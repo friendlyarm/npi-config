@@ -677,8 +677,8 @@ do_peripheral_status() {
     return 0
   fi
   if [ ! -e /boot/${DTB} ]; then
-    whiptail --msgbox "${DTB} not found" 20 60 1
-    return 1
+    whiptail --msgbox "Unsupported ${BOARD} with Linux-${ker_version}" 20 60 1
+    return 0
   fi
   if ! dpkg -s device-tree-compiler >/dev/null 2>&1; then
     whiptail --msgbox "please apt-get install device-tree-compiler" 20 60 1
