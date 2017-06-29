@@ -198,7 +198,7 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.0.2)\n
+npi-config (v1.0.3)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
@@ -430,20 +430,67 @@ do_boot_behaviour() {
 }
 
 do_audio() {
-  AUDIO_OUT=$(whiptail --menu "Choose the audio output" 20 60 10 \
-    "1" "Force 3.5mm ('headphone') jack" \
-    "2" "Force HDMI" \
-    3>&1 1>&2 2>&3)
+  local cardnum=`aplay -l | grep card -c`
+  local card0="card 0"
+  local card1="card 1"
+  local card2="card 2"
+  local card0_desc="`aplay -l | grep "${card0}" | cut -d "[" -f 2 | cut -d "]" -f 1`"
+  local card1_desc="`aplay -l | grep "${card1}" | cut -d "[" -f 2 | cut -d "]" -f 1`"
+  local card2_desc="`aplay -l | grep "${card2}" | cut -d "[" -f 2 | cut -d "]" -f 1`"
+  local selected_audio="card 0"
+
+  local cur_card="`grep -o "card [0-9]" /etc/asound.conf | head -n 1`"
+  case "$cur_card" in
+    ${card0})
+    card0_desc=${card0_desc}"(X)"
+    ;;
+    ${card1})
+    card1_desc=${card1_desc}"(X)"
+    ;;
+    ${card2})
+    card2_desc=${card2_desc}"(X)"
+    ;;
+  esac
+
+  if [ -z $1 ]; then
+    case "$cardnum" in
+      1) 
+      selected_audio=$(whiptail --menu "Choose the audio output" 20 60 10 \
+      "${card0}" "${card0_desc}" \
+      3>&1 1>&2 2>&3)
+      ;;
+      2)
+      selected_audio=$(whiptail --menu "Choose the audio output" 20 60 10 \
+      "${card0}" "${card0_desc}" \
+      "${card1}" "${card1_desc}" \
+      3>&1 1>&2 2>&3)
+      ;;
+      3) 
+      selected_audio=$(whiptail --menu "Choose the audio output" 20 60 10 \
+      "${card0}" "${card0_desc}" \
+      "${card1}" "${card1_desc}" \
+      "${card2}" "${card2_desc}" \
+      3>&1 1>&2 2>&3)
+      ;;
+      *) 
+      whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 
+      return 1
+      ;;
+    esac
+  else
+    selected_audio=$1
+  fi
 
   if [ $? -eq 0 ]; then
     CARDNUM=0
-
-    if [ ${AUDIO_OUT} -eq 1 ]; then
+    if [ "${selected_audio}" = "${card0}" ]; then
       CARDNUM=0
-    fi
-
-    if [ ${AUDIO_OUT} -eq 2 ]; then
+    elif [ "${selected_audio}" = "${card1}" ]; then
       CARDNUM=1
+    elif [ "${selected_audio}" = "${card2}" ]; then
+      CARDNUM=2
+    else
+      return 0
     fi
 
     cat >/etc/asound.conf <<EOL
@@ -458,10 +505,16 @@ ctl.!default {
     card ${CARDNUM}
 }
 EOL
-    whiptail --yesno "Would you like to restart ALSA now?" 20 60 2
-    if [ $? -eq 0 ]; then # yes
-      alsa force-reload
-      whiptail --msgbox "ALSA restart done." 20 60 1
+    # Debian-jessie not support this command: 
+    # https://packages.debian.org/jessie/all/alsa-base/filelist
+    if [ -e /usr/sbin/alsa ]; then
+      whiptail --yesno "Would you like to restart ALSA now?" 20 60 2
+      if [ $? -eq 0 ]; then # yes
+        alsa force-reload
+        whiptail --msgbox "ALSA restart done." 20 60 1
+      fi
+    else
+      ASK_TO_REBOOT=1
     fi
   fi
 }
@@ -647,8 +700,7 @@ do_welcome_message() {
   fi
 }
 
-do_get_dtb_status()
-{
+do_get_dtb_status() {
   local DTB=$1
   local NODE=$2
   RET=`fdtget ${DTB} ${NODE} status`
@@ -659,9 +711,87 @@ do_get_dtb_status()
   fi
 }
 
+do_select_spi0dev() {
+  local DTB=${1}
+  local spidev0="spidev0.0"
+  local spidev1="spi-2.8'tft"
+  local spidev2="spi-flash"
+  local spidev0_desc="SPI0 char device"
+  local spidev1_desc="Matrix-2'8_SPI_Key_TFT"
+  local spidev2_desc="SPI0 flash on NEO Core Base Board"
+  local selected_dev="spidev0.0"  
+  local spidev0_status=`do_get_dtb_status /boot/${DTB} spidev0 status`
+  local spidev1_status=`do_get_dtb_status /boot/${DTB} pitft status`
+  local spidev2_status=`do_get_dtb_status /boot/${DTB} spiflash status`
+
+  if [ "x${spidev0_status}" = "xenabled" ];then
+    spidev0_desc=${spidev0_desc}"(X)"
+  elif [ "x${spidev1_status}" = "xenabled" ];then
+    spidev1_desc=${spidev1_desc}"(X)"
+  elif [ "x${spidev2_status}" = "xenabled" ];then
+    spidev2_desc=${spidev2_desc}"(X)"
+  fi
+
+  selected_dev=$(whiptail --menu "Choose the spi0 device" 20 60 10 \
+  "${spidev0}" "${spidev0_desc}" \
+  "${spidev1}" "${spidev1_desc}" \
+  "${spidev2}" "${spidev2_desc}" \
+  3>&1 1>&2 2>&3)
+
+  if [ $? -eq 0 ]; then
+    case ${selected_dev} in
+    ${spidev0})
+    fdtput --type s /boot/${DTB} spidev0 status "okay" || whiptail --msgbox "Fail to enable ${spidev0}" 20 60 1
+    fdtput --type s /boot/${DTB} pitft status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s /boot/${DTB} pitft_ts status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s /boot/${DTB} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
+    do_display fb0
+    ;;
+    ${spidev1})
+    fdtput --type s /boot/${DTB} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
+    fdtput --type s /boot/${DTB} pitft status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
+    fdtput --type s /boot/${DTB} pitft_ts status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
+    fdtput --type s /boot/${DTB} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
+    do_display fb-st7789s
+    ;;
+    ${spidev2})
+    fdtput --type s /boot/${DTB} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
+    fdtput --type s /boot/${DTB} pitft status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s /boot/${DTB} pitft_ts status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s /boot/${DTB} spiflash status "okay" || whiptail --msgbox "Fail to enable ${spidev2}" 20 60 1
+    do_display fb0
+    ;;
+    esac
+  fi
+}
+
+do_select_i2s0dev() {
+  local DTB=${1}
+  local selected_dev="pcm5102a"  
+  local i2sdev0="pcm5102a"
+  local i2sdev0_desc="NanoHat PCM5102A"
+  local i2sdev0_status=`do_get_dtb_status /boot/${DTB} pcm5102a status`
+  
+  if [ "x${i2sdev0_status}" = "xenabled" ];then
+    i2sdev0_desc=${spidev0_desc}"(X)"
+  fi
+
+  selected_dev=$(whiptail --menu "Choose the i2s0 device" 20 60 10 \
+  "${i2sdev0}" "${i2sdev0_desc}" \
+  3>&1 1>&2 2>&3)
+
+  if [ $? -eq 0 ]; then
+    case ${selected_dev} in
+    ${i2sdev0})
+    fdtput --type s /boot/${DTB} pcm5102a status "okay" || whiptail --msgbox "Fail to enable ${i2sdev0}" 20 60 1
+    ;;
+    esac
+  fi
+}
+
 do_peripheral_status() {
 
-  local BOARD=`grep BOARD_NAME /etc/friendlyelec-release | cut -d "=" -f 2 | tr -d '"' | tr '[A-Z]' '[a-z]'`
+  local BOARD=`dmesg | grep "Machine model" | awk '{ print $NF }' | tr '[A-Z]' '[a-z]'`
   local HARDWARE=`grep Hardware /proc/cpuinfo | cut -d ":" -f 2 | tr -d ' '`
   local DTB="unknown"
   local ker_version=`uname -r`
@@ -723,42 +853,125 @@ do_peripheral_status() {
     "${peripherals}0" "Enable/Disable ${peripherals}0[${pwm0_status}]" \
     3>&1 1>&2 2>&3)
     ;;
+  i2s)
+    local i2s0_status=`do_get_dtb_status /boot/${DTB} i2s0 status`
+    FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "${peripherals}0" "Enable/Disable ${peripherals}0[${i2s0_status}]" \
+    3>&1 1>&2 2>&3)
+    ;;
   esac
   RET=$?
   if [ $RET -eq 1 ]; then
     return 0
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
-      serial*|i2c*|spi*|pwm*)
+      serial*|i2c*|spi*|pwm*|i2s*|pcm5102a*)
             if [ "x$FUN" = "xserial0" ]; then
-              local warning="WARNING: Enable serial0 will disable pwm0"
+              local warning="WARNING: Enable $FUN will disable pwm0"
             elif [ "x$FUN" = "xpwm0" ]; then
-              local warning="WARNING: Enable pwm0 will disable debug serial0"
+              local warning="WARNING: Enable $FUN will disable debug serial0"
+            elif [ "x$FUN" = "xi2c1" ]; then
+              local warning="WARNING: Enable $FUN will disable i2s0"
+            elif [ "x$FUN" = "xi2s0" -o "x$FUN" = "xpcm5102a" ]; then
+              local warning="WARNING: Enable $FUN will disable i2c1"
             fi
-            whiptail --yesno "Enable/Disable ${FUN} interface?\n${warning}" 20 60 2 \
+            whiptail --yesno "Enable/Disable ${FUN} module?\n${warning}" 20 60 2 \
                   --yes-button Enable --no-button Disable
 
             RET=$? 
             if [ $RET -eq 0 ]; then
                 fdtput --type s /boot/${DTB} ${FUN} status "okay" || whiptail --msgbox "Fail to enable $FUN" 20 60 1
-                # uart0 & pwm0 share same pin: GPIOA5
-                if [ "x${FUN}" = "xserial0" ]; then
+                if [ "x${FUN}" = "xserial0" ]; then   # uart0 & pwm0 share same pin: GPIOA5
                   fdtput --type s /boot/${DTB} pwm0 status "disabled" || whiptail --msgbox "Fail to disable pwm0" 20 60 1
                   sed -i 's/tty0/ttyS0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
                 elif [ "x${FUN}" = "xpwm0" ]; then
                   fdtput --type s /boot/${DTB} serial0 status "disabled" || whiptail --msgbox "Fail to disable serial0" 20 60 1
                   sed -i 's/ttyS0/tty0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
+                elif [ "x${FUN}" = "xi2c1" ]; then    # i2c1 & i2s0 share same pin.
+                  fdtput --type s /boot/${DTB} i2s0 status "disabled" || whiptail --msgbox "Fail to disable i2s0" 20 60 1
+                elif [ "x${FUN}" = "xi2s0" ]; then
+                  fdtput --type s /boot/${DTB} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
+                  do_select_i2s0dev ${DTB}
+                elif [ "x${FUN}" = "xpcm5102a" ]; then
+                  fdtput --type s /boot/${DTB} i2s0 status "okay" || whiptail --msgbox "Fail to enable i2s0" 20 60 1
+                  fdtput --type s /boot/${DTB} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
+                elif [ "x${FUN}" = "xspi0" ]; then
+                  do_select_spi0dev ${DTB}
                 fi
             else
                 fdtput --type s /boot/${DTB} ${FUN} status "disabled" || whiptail --msgbox "Fail to disable $FUN" 20 60 1
             fi
             ASK_TO_REBOOT=1
             sync
-            sleep 1
             ;;
       *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
     esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
   fi
+}
+
+do_display() {
+  local cardnum=`ls /sys/class/graphics/ | grep -cE fb[0-9]`
+  local card0="fb0"
+  local card1="fb-st7789s"
+  local card0_desc="Default framebuffer"
+  local card1_desc="Matrix-2'8_SPI_Key_TFT"
+  local selected_disp="fb0"
+  local tty_dev=0
+  local HARDWARE=`grep Hardware /proc/cpuinfo | cut -d ":" -f 2 | tr -d ' '`
+
+  # only support H3 & H5
+  if [ "x${HARDWARE}" != "xAllwinnersun50iw2Family" -a "x${HARDWARE}" != "xsun8i" ]; then
+    whiptail --msgbox "Unsupported board with Linux-${ker_version}" 20 60 1
+    return 0
+  fi
+
+  if [ -z $1 ]; then
+    grep "map:0" /boot/boot.cmd -q
+    if [ $? = 0 ]; then
+      card0_desc=${card0_desc}"(X)"
+    else
+      card1_desc=${card1_desc}"(X)"
+    fi
+
+    case "$cardnum" in
+      1) 
+      selected_disp=$(whiptail --menu "Choose the display output" 20 60 10 \
+      "${card0}" "${card0_desc}" \
+      3>&1 1>&2 2>&3)
+      ;;
+      2)
+      selected_disp=$(whiptail --menu "Choose the display output" 20 60 10 \
+      "${card0}" "${card0_desc}" \
+      "${card1}" "${card1_desc}" \
+      3>&1 1>&2 2>&3)
+      ;;
+      *) 
+      whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 
+      return 1
+      ;;
+    esac
+  else 
+    selected_disp=$1
+  fi
+  
+  if [ "${selected_disp}" = "${card0}" ]; then
+    tty_dev=0
+    sed -i "s/setqt4env_matrix$/setqt4env/" /etc/rc.local >/dev/null 2>&1
+    sed -i "s/setqt4env_matrix$/setqt4env/" /opt/QtE-Demo/run.sh >/dev/null 2>&1
+    sed -i "s/input/friendlyarm-ts-input/" /etc/ts.conf >/dev/null 2>&1
+  elif [ "${selected_disp}" = "${card1}" ]; then
+    tty_dev=1
+    sed -i "s/setqt4env$/setqt4env_matrix/" /etc/rc.local >/dev/null 2>&1
+    sed -i "s/setqt4env$/setqt4env_matrix/" /opt/QtE-Demo/run.sh >/dev/null 2>&1
+    sed -i "s/friendlyarm-ts-input/input/" /etc/ts.conf >/dev/null 2>&1
+  else
+    return 0
+  fi
+  sed -i "s/map:\([0-9]\)/map:${tty_dev}/" /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
+  sed -i "s/\/dev\/fb[-a-z0-9]*:/\/dev\/${selected_disp}:/" /opt/QtE-Demo/run.sh >/dev/null 2>&1 # for qt-demo
+  sed -i "s/\/dev\/fb[-a-z0-9]*/\/dev\/${selected_disp}/" /etc/X11/xorg.conf >/dev/null 2>&1     # for Debian X11
+  rm -rf /etc/pointercal
+  ASK_TO_REBOOT=1
 }
 
 #    "P2 Wireless Settings" "Connect to router, or enable AP mode" \
@@ -780,24 +993,28 @@ do_interface_menu() {
 }
 do_advanced_menu() {
   FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
-    "A1 Audio" "Force audio out through HDMI or 3.5mm jack" \
+    "A0 Display" "Select default display output device(H3/H5)" \
+    "A1 Audio" "Select default audio output device" \
     "A2 Welcome message" "Disable/Enable Linux welcome message" \
     "A3 Serial" "Enable/Disable Serial" \
     "A4 I2C" "Enable/Disable I2C" \
     "A5 SPI" "Enable/Disable SPI" \
     "A6 PWM" "Enable/Disable PWM" \
+    "A7 I2S" "Enable/Disable I2S" \
     3>&1 1>&2 2>&3)
   RET=$?
   if [ $RET -eq 1 ]; then
     return 0
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
+      A0\ *) do_display ;;
       A1\ *) do_audio ;;
       A2\ *) do_welcome_message ;;
       A3\ *) do_peripheral_status serial ;;
       A4\ *) do_peripheral_status i2c ;;
       A5\ *) do_peripheral_status spi ;;
       A6\ *) do_peripheral_status pwm ;;
+      A7\ *) do_peripheral_status i2s ;;
       *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
     esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
   fi
