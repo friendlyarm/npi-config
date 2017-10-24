@@ -956,14 +956,22 @@ do_display() {
   
   if [ "${selected_disp}" = "${card0}" ]; then
     tty_dev=0
+    # qt4
     sed -i "s/setqt4env_matrix$/setqt4env/" /etc/rc.local >/dev/null 2>&1
     sed -i "s/setqt4env_matrix$/setqt4env/" /opt/QtE-Demo/run.sh >/dev/null 2>&1
     sed -i "s/input/friendlyarm-ts-input/" /etc/ts.conf >/dev/null 2>&1
+    # qt5
+    sed -i "s#input/ts-ads7846#touchscreen-1wire#" /etc/friendlyarm-ts-input.conf
+    sed -i "s#fb-st7789s#fb0#" /usr/bin/setqt5env
   elif [ "${selected_disp}" = "${card1}" ]; then
     tty_dev=1
+    # qt4
     sed -i "s/setqt4env$/setqt4env_matrix/" /etc/rc.local >/dev/null 2>&1
     sed -i "s/setqt4env$/setqt4env_matrix/" /opt/QtE-Demo/run.sh >/dev/null 2>&1
     sed -i "s/friendlyarm-ts-input/input/" /etc/ts.conf >/dev/null 2>&1
+    # qt5
+    sed -i "s#touchscreen-1wire#input/ts-ads7846#" /etc/friendlyarm-ts-input.conf
+    sed -i "s#fb0#fb-st7789s#" /usr/bin/setqt5env
   else
     return 0
   fi
