@@ -12,7 +12,11 @@ if [ -f /etc/friendlyelec-release ]; then
   # BOARD="NanoPC-T2"
   # LINUXFAMILY=nanopi2
   . /etc/friendlyelec-release                       
+else
+    echo "Not found /etc/friendlyelec-release, Unable to determine the board model."
+    return 1
 fi
+KERN_VERSION=`uname -r`
 
 get_init_sys() {
   if command -v systemctl > /dev/null && systemctl | grep -q '\-\.mount'; then
@@ -198,11 +202,13 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.0.3)\n
+npi-config (v1.0.4)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
-you have heavily customised your installation.\
+you have heavily customised your installation.\n\n
+Currnet Model: ${BOARD}
+Kernel Version: ${KERN_VERSION}\
 " 20 70 1
   return 0
 }
@@ -790,24 +796,22 @@ do_select_i2s0dev() {
 }
 
 do_peripheral_status() {
-
-  local BOARD=`dmesg | grep "Machine model" | awk '{ print $NF }' | tr '[A-Z]' '[a-z]'`
-  local HARDWARE=`grep Hardware /proc/cpuinfo | cut -d ":" -f 2 | tr -d ' '`
   local DTB="unknown"
-  local ker_version=`uname -r`
-  if [ "x${HARDWARE}" = "xAllwinnersun50iw2Family" ]; then
-    DTB=sun50i-h5-${BOARD}.dtb
-  elif [ "x${HARDWARE}" = "xsun8i" ]; then
-    DTB=sun8i-h3-${BOARD}.dtb
-    if [ "x${BOARD}" = "xnanopi-duo" ]; then
-      DTB=sun8i-h2-plus-${BOARD}.dtb
+  # lower case board name
+  local BOARD_LC=$(echo $BOARD|tr '[:upper:]' '[:lower:]')
+  if [ "x${LINUXFAMILY}" = "xAllwinnersun50iw2Family" ]; then
+    DTB=sun50i-h5-${BOARD_LC}.dtb
+  elif [ "x${LINUXFAMILY}" = "xsun8i" ]; then
+    DTB=sun8i-h3-${BOARD_LC}.dtb
+    if [ "x${BOARD_LC}" = "xnanopi-duo" ]; then
+      DTB=sun8i-h2-plus-${BOARD_LC}.dtb
     fi
   else
-    whiptail --msgbox "Unsupported ${BOARD} with Linux-${ker_version}" 20 60 1
+    whiptail --msgbox "Unsupported ${BOARD} with Linux-${KERN_VERSION}" 20 60 1
     return 0
   fi
   if [ ! -e /boot/${DTB} ]; then
-    whiptail --msgbox "Unsupported ${BOARD} with Linux-${ker_version}" 20 60 1
+    whiptail --msgbox "Unsupported ${BOARD} with Linux-${KERN_VERSION}" 20 60 1
     return 0
   fi
   if ! dpkg -s device-tree-compiler >/dev/null 2>&1; then
@@ -917,11 +921,10 @@ do_display() {
   local card1_desc="Matrix-2'8_SPI_Key_TFT"
   local selected_disp="fb0"
   local tty_dev=0
-  local HARDWARE=`grep Hardware /proc/cpuinfo | cut -d ":" -f 2 | tr -d ' '`
 
   # only support H3 & H5
-  if [ "x${HARDWARE}" != "xAllwinnersun50iw2Family" -a "x${HARDWARE}" != "xsun8i" ]; then
-    whiptail --msgbox "Unsupported board with Linux-${ker_version}" 20 60 1
+  if [ "x${LINUXFAMILY}" != "xAllwinnersun50iw2Family" -a "x${LINUXFAMILY}" != "xsun8i" ]; then
+    whiptail --msgbox "Unsupported board with Linux-${KERN_VERSION}" 20 60 1
     return 0
   fi
 
