@@ -214,7 +214,7 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.0.4)\n
+npi-config (v1.0.5)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
@@ -424,8 +424,8 @@ do_set_boot_from_tf_env() {
   (cd /boot && {\
     sed -i 's/ root=\/dev\/[^ ]* / root=\/dev\/mmcblk0p2 /g' boot.cmd; \
     mkimage -C none -A arm -T script -d boot.cmd boot.scr; \
-    ASK_TO_REBOOT=1; \
   })
+  ASK_TO_REBOOT=1;
   whiptail --msgbox "${BOARD} should boot from TF card next time you reboot the board." 20 60 1
 }
 
@@ -433,8 +433,8 @@ do_set_boot_from_hd_env() {
   (cd /boot && {\
     sed -i 's/ root=\/dev\/[^ ]* / root=\/dev\/sda1 /g' boot.cmd; \
     mkimage -C none -A arm -T script -d boot.cmd boot.scr; \
-    ASK_TO_REBOOT=1; \
   })
+  ASK_TO_REBOOT=1
   whiptail --msgbox "${BOARD} should boot from hard drive next time you reboot the board." 20 60 1
 }
 
@@ -496,6 +496,8 @@ do_boot_from_hd() {
       else
         NEED_REBUILD=1
       fi
+    else
+      NEED_REBUILD=1
     fi
 
     if [ $NEED_REBUILD -eq 1 ]; then
