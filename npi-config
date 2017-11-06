@@ -17,6 +17,18 @@ else
     return 1
 fi
 KERN_VERSION=`uname -r`
+BOARD_LC=$(echo $BOARD|tr '[:upper:]' '[:lower:]')
+
+is_allwinner_mainline_kernel() {
+  IS_ALLWINNER_M=0
+  if [ "x${LINUXFAMILY}" = "xAllwinnersun50iw2Family" ]; then
+    IS_ALLWINNER_M=1
+  elif [ "x${LINUXFAMILY}" = "xsun8i" ]; then
+    IS_ALLWINNER_M=1
+  else
+    return 1
+  fi
+}
 
 get_init_sys() {
   if command -v systemctl > /dev/null && systemctl | grep -q '\-\.mount'; then
@@ -405,6 +417,158 @@ EOF
   fi
   if [ "$INTERACTIVE" = True ]; then
     whiptail --msgbox "Waiting for network on boot is $STATUS" 20 60 1
+  fi
+}
+
+do_set_boot_from_tf_env() {
+  (cd /boot && {\
+    sed -i 's/ root=\/dev\/[^ ]* / root=\/dev\/mmcblk0p2 /g' boot.cmd; \
+    mkimage -C none -A arm -T script -d boot.cmd boot.scr; \
+    ASK_TO_REBOOT=1; \
+  })
+  whiptail --msgbox "${BOARD} should boot from TF card next time you reboot the board." 20 60 1
+}
+
+do_set_boot_from_hd_env() {
+  (cd /boot && {\
+    sed -i 's/ root=\/dev\/[^ ]* / root=\/dev\/sda1 /g' boot.cmd; \
+    mkimage -C none -A arm -T script -d boot.cmd boot.scr; \
+    ASK_TO_REBOOT=1; \
+  })
+  whiptail --msgbox "${BOARD} should boot from hard drive next time you reboot the board." 20 60 1
+}
+
+do_boot_from_tf() {
+  grep 'root=\/dev\/mmcblk0p2' /proc/cmdline 2>&1 > /dev/null
+  RET=$?
+  if [ $RET -eq 0 ]; then
+    whiptail --msgbox "The current setting is this one." 20 60 2
+    return 0
+  fi
+  do_set_boot_from_tf_env
+}
+
+do_boot_from_hd() {
+    grep 'root=\/dev\/sda1' /proc/cmdline 2>&1 > /dev/null
+    RET=$?
+    if [ $RET -eq 0 ]; then
+      whiptail --msgbox "The current setting is this one." 20 60 2
+      return 0
+    fi
+
+    is_allwinner_mainline_kernel
+    if [ $IS_ALLWINNER_M -eq 0 ]; then
+      whiptail --msgbox "Only allwinner boards and mainline kernel support this option." 20 60 2
+      return 0
+    fi
+
+    if [ ! -e /dev/sda ]; then
+      whiptail --msgbox "No hard disk device was found." 20 60 2
+      return 0
+    fi
+
+    HAS_SYS_ON_HD=0
+    if [ -e /dev/sda1 ]; then
+      mount | grep /dev/sda1 2>&1 > /dev/null
+      RET=$?
+      if [ $RET -eq 0 ]; then
+        umount /dev/sda1
+      fi
+      mkdir -p /tmp/sda1
+      mount /dev/sda1 /tmp/sda1
+      RET=$?
+      if [ $RET -eq 0 ]; then
+        if [ -d /tmp/sda1/etc -a -d /tmp/sda1/usr/bin ]; then
+          HAS_SYS_ON_HD=1
+        fi
+        umount /dev/sda1
+        rm -rf /tmp/sda1
+      fi
+    fi
+
+    NEED_REBUILD=0
+    if [ $HAS_SYS_ON_HD -eq 1 ]; then 
+      whiptail --yesno "Found existing system on /dev/sda1, would you like to use it?" 20 60 2
+      RET=$?
+      if [ $RET -eq 0 ]; then # yes
+        # use system on /dev/sda1
+        NEED_REBUILD=0
+      else
+        NEED_REBUILD=1
+      fi
+    fi
+
+    if [ $NEED_REBUILD -eq 1 ]; then
+        whiptail --yesno "WARNING: Now will create system for hard drive, it will erase all data on this disk, do you want to continue?" 20 60 2
+        RET=$?
+        if [ $RET -eq 0 ]; then
+          # remove all partition
+          dd if=/dev/zero of=/dev/sda bs=512 count=1 conv=notrunc
+          # add a partition and format
+          fdisk /dev/sda << FDISKEOF
+n
+p
+1
+
+
+w
+FDISKEOF
+          yes | mkfs.ext4 /dev/sda1
+          mkdir -p /diskmount
+          mount /dev/sda1 /diskmount
+
+          echo "Copying rootfs from TF card to Hard drive, please wait ..."
+          find /* -maxdepth 0 | \
+           grep -v "/diskmount" | \
+           grep -v "/proc" | \
+           grep -v "/sys" | \
+           xargs cp -af --target-directory=/diskmount
+
+          mkdir /diskmount/proc
+          chmod 0555 /diskmount/proc
+          chown root:root /diskmount/proc
+
+          mkdir /diskmount/sys
+          chmod 0555 /diskmount/sys
+          chown root:root /diskmount/sys
+
+          umount /dev/sda1
+          rm -rf /diskmount
+        else
+          # use cancel, do nothing
+          return 0
+        fi
+    fi
+
+    do_set_boot_from_hd_env
+    return 0
+}
+
+do_boot_device() {
+  is_allwinner_mainline_kernel
+  if [ $IS_ALLWINNER_M -eq 0 ]; then
+    whiptail --msgbox "Only allwinner boards and mainline kernel support this option." 20 60 2
+    return 0
+  fi
+
+  if [ ! -e /dev/sda ]; then
+    whiptail --msgbox "No other storage device was found." 20 60 2
+    return 0
+  fi
+
+  BOOTOPT=$(whiptail --menu "Chose boot device" 20 60 10 \
+      "D1 Hard drive" "Load the root filesystem from SSD/HD/Usbdisk" \
+      "D2 TF card" "Load the root filesystem from TF card" \
+    3>&1 1>&2 2>&3)
+  if [ $? -eq 0 ]; then
+    case "$BOOTOPT" in
+      D1*) do_boot_from_hd ;;
+      D2*) do_boot_from_tf ;;
+      *)
+        whiptail --msgbox "Programmer error, unrecognised boot option" 20 60 2
+        return 1
+        ;;
+    esac
   fi
 }
 
@@ -798,7 +962,6 @@ do_select_i2s0dev() {
 do_peripheral_status() {
   local DTB="unknown"
   # lower case board name
-  local BOARD_LC=$(echo $BOARD|tr '[:upper:]' '[:lower:]')
   if [ "x${LINUXFAMILY}" = "xAllwinnersun50iw2Family" ]; then
     DTB=sun50i-h5-${BOARD_LC}.dtb
   elif [ "x${LINUXFAMILY}" = "xsun8i" ]; then
@@ -1035,6 +1198,7 @@ do_boot_menu() {
   FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Boot Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "B1 Autologin" "Choose how to boot into text console, autologin or requiring user" \
     "B2 Wait for Network at Boot" "Choose whether to wait for network connection during boot" \
+    "B3 Boot device" "Choose the boot device" \
     3>&1 1>&2 2>&3)
 
   RET=$?
@@ -1044,6 +1208,7 @@ do_boot_menu() {
     case "$FUN" in
       B1\ *) do_boot_behaviour ;;
       B2\ *) do_boot_wait ;;
+      B3\ *) do_boot_device ;;
       *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
     esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
   fi
