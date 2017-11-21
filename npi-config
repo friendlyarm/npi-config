@@ -214,7 +214,7 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.0.6)\n
+npi-config (v1.0.7)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
@@ -904,11 +904,15 @@ do_select_spi0dev() {
     spidev2_desc=${spidev2_desc}"(X)"
   fi
 
-  selected_dev=$(whiptail --menu "Choose the spi0 device" 20 60 10 \
-  "${spidev0}" "${spidev0_desc}" \
-  "${spidev1}" "${spidev1_desc}" \
-  "${spidev2}" "${spidev2_desc}" \
-  3>&1 1>&2 2>&3)
+  if [ ${2} = ${spidev0} -o ${2} = ${spidev1} -o ${2} = ${spidev2} ]; then
+    selected_dev=${2}
+  else
+    selected_dev=$(whiptail --menu "Choose the spi0 device" 20 60 10 \
+    "${spidev0}" "${spidev0_desc}" \
+    "${spidev1}" "${spidev1_desc}" \
+    "${spidev2}" "${spidev2_desc}" \
+    3>&1 1>&2 2>&3)
+  fi
 
   if [ $? -eq 0 ]; then
     case ${selected_dev} in
@@ -920,11 +924,18 @@ do_select_spi0dev() {
     do_display fb0
     ;;
     ${spidev1})
-    fdtput --type s /boot/${DTB} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
-    fdtput --type s /boot/${DTB} pitft status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
-    fdtput --type s /boot/${DTB} pitft_ts status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
-    fdtput --type s /boot/${DTB} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
-    do_display fb-st7789s
+    local warning="WARNING: Enable ${spidev1} will disable serial2"
+    whiptail --yesno "Enable/Disable ${spidev1} module?\n${warning}" 20 60 2 \
+                  --yes-button Enable --no-button Disable
+    RET=$? 
+    if [ $RET -eq 0 ]; then
+      fdtput --type s /boot/${DTB} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
+      fdtput --type s /boot/${DTB} pitft status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
+      fdtput --type s /boot/${DTB} pitft_ts status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
+      fdtput --type s /boot/${DTB} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
+      fdtput --type s /boot/${DTB} serial2 status "disabled" || whiptail --msgbox "Fail to disable ${serial2}" 20 60 1
+      do_display fb-st7789s
+    fi
     ;;
     ${spidev2})
     fdtput --type s /boot/${DTB} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
@@ -1037,6 +1048,8 @@ do_peripheral_status() {
       serial*|i2c*|spi*|pwm*|i2s*|pcm5102a*)
             if [ "x$FUN" = "xserial0" ]; then
               local warning="WARNING: Enable $FUN will disable pwm0"
+            elif [ "x$FUN" = "xserial2" ]; then
+              local warning="WARNING: Enable $FUN will disable 2.8-tft"
             elif [ "x$FUN" = "xpwm0" ]; then
               local warning="WARNING: Enable $FUN will disable debug serial0"
             elif [ "x$FUN" = "xi2c1" ]; then
@@ -1053,6 +1066,8 @@ do_peripheral_status() {
                 if [ "x${FUN}" = "xserial0" ]; then   # uart0 & pwm0 share same pin: GPIOA5
                   fdtput --type s /boot/${DTB} pwm0 status "disabled" || whiptail --msgbox "Fail to disable pwm0" 20 60 1
                   sed -i 's/tty0/ttyS0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
+                elif [ "x${FUN}" = "xserial2" ]; then
+                  do_select_spi0dev ${DTB} "spidev0.0"
                 elif [ "x${FUN}" = "xpwm0" ]; then
                   fdtput --type s /boot/${DTB} serial0 status "disabled" || whiptail --msgbox "Fail to disable serial0" 20 60 1
                   sed -i 's/ttyS0/tty0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
