@@ -1046,32 +1046,19 @@ do_peripheral_status() {
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
       serial*|i2c*|spi*|pwm*|i2s*|pcm5102a*)
-            if [ "x$FUN" = "xserial0" ]; then
-              local warning="WARNING: Enable $FUN will disable pwm0"
-            elif [ "x$FUN" = "xserial2" ]; then
-              local warning="WARNING: Enable $FUN will disable 2.8-tft"
-            elif [ "x$FUN" = "xpwm0" ]; then
-              local warning="WARNING: Enable $FUN will disable debug serial0"
-            elif [ "x$FUN" = "xi2c1" ]; then
-              local warning="WARNING: Enable $FUN will disable i2s0"
-            elif [ "x$FUN" = "xi2s0" -o "x$FUN" = "xpcm5102a" ]; then
-              local warning="WARNING: Enable $FUN will disable i2c1"
-            fi
-            whiptail --yesno "Enable/Disable ${FUN} module?\n${warning}" 20 60 2 \
+            whiptail --yesno "Enable/Disable ${FUN} module?\n" 20 60 2 \
                   --yes-button Enable --no-button Disable
 
             RET=$? 
             if [ $RET -eq 0 ]; then
                 fdtput --type s /boot/${DTB} ${FUN} status "okay" || whiptail --msgbox "Fail to enable $FUN" 20 60 1
-                if [ "x${FUN}" = "xserial0" ]; then   # uart0 & pwm0 share same pin: GPIOA5
+                if [ "x${FUN}" = "xserial0" ]; then           # serial0 & pwm0 share PA5
                   fdtput --type s /boot/${DTB} pwm0 status "disabled" || whiptail --msgbox "Fail to disable pwm0" 20 60 1
                   sed -i 's/tty0/ttyS0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
-                elif [ "x${FUN}" = "xserial2" ]; then
-                  do_select_spi0dev ${DTB} "spidev0.0"
                 elif [ "x${FUN}" = "xpwm0" ]; then
                   fdtput --type s /boot/${DTB} serial0 status "disabled" || whiptail --msgbox "Fail to disable serial0" 20 60 1
                   sed -i 's/ttyS0/tty0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
-                elif [ "x${FUN}" = "xi2c1" ]; then    # i2c1 & i2s0 share same pin.
+                elif [ "x${FUN}" = "xi2c1" ]; then            # i2c1 & i2s0 share same pin.
                   fdtput --type s /boot/${DTB} i2s0 status "disabled" || whiptail --msgbox "Fail to disable i2s0" 20 60 1
                 elif [ "x${FUN}" = "xi2s0" ]; then
                   fdtput --type s /boot/${DTB} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
@@ -1081,6 +1068,12 @@ do_peripheral_status() {
                   fdtput --type s /boot/${DTB} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
                 elif [ "x${FUN}" = "xspi0" ]; then
                   do_select_spi0dev ${DTB}
+                elif [ "x${FUN}" = "xserial2" ]; then         # serial2 & 2.8-tft share PA1
+                  do_select_spi0dev ${DTB} "spidev0.0"
+                elif [ "x${FUN}" = "xserial3" ]; then            # serial3 & spi1 share same pin
+                  fdtput --type s /boot/${DTB} spi1 status "disabled" || whiptail --msgbox "Fail to disable spi1" 20 60 1
+                elif [ "x${FUN}" = "xspi1" ]; then
+                  fdtput --type s /boot/${DTB} serial3 status "disabled" || whiptail --msgbox "Fail to disable serial3" 20 60 1
                 fi
             else
                 fdtput --type s /boot/${DTB} ${FUN} status "disabled" || whiptail --msgbox "Fail to disable $FUN" 20 60 1
