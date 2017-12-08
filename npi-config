@@ -214,7 +214,7 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.0.7)\n
+npi-config (v1.0.8)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
@@ -890,7 +890,7 @@ do_select_spi0dev() {
   local spidev2="spi-flash"
   local spidev0_desc="SPI0 char device"
   local spidev1_desc="Matrix-2'8_SPI_Key_TFT"
-  local spidev2_desc="SPI0 flash on NEO Core Base Board"
+  local spidev2_desc="SPI0 flash"
   local selected_dev="spidev0.0"  
   local spidev0_status=`do_get_dtb_status /boot/${DTB} spidev0 status`
   local spidev1_status=`do_get_dtb_status /boot/${DTB} pitft status`
@@ -1138,8 +1138,8 @@ do_display() {
       sed -i "s/setqt4env_matrix$/setqtenv/" /opt/QtE-Demo/run.sh >/dev/null 2>&1
       sed -i "s/input/friendlyarm-ts-input/" /etc/ts.conf >/dev/null 2>&1
     else
-      sed -i "s#input/ts-ads7846#touchscreen-1wire#" /etc/friendlyarm-ts-input.conf
-      sed -i "s#fb-st7789s#fb0#" /usr/bin/setqt5env
+      sed -i "s#input/ts-ads7846#touchscreen-1wire#" /etc/friendlyarm-ts-input.conf >/dev/null 2>&1
+      sed -i "s#fb-st7789s#fb0#" /usr/bin/setqt5env >/dev/null 2>&1
     fi
   elif [ "${selected_disp}" = "${card1}" ]; then
     tty_dev=1
@@ -1150,8 +1150,8 @@ do_display() {
       sed -i "s/friendlyarm-ts-input/input/" /etc/ts.conf >/dev/null 2>&1
     else
       # qt5
-      sed -i "s#touchscreen-1wire#input/ts-ads7846#" /etc/friendlyarm-ts-input.conf
-      sed -i "s#fb0#fb-st7789s#" /usr/bin/setqt5env
+      sed -i "s#touchscreen-1wire#input/ts-ads7846#" /etc/friendlyarm-ts-input.conf >/dev/null 2>&1
+      sed -i "s#fb0#fb-st7789s#" /usr/bin/setqt5env >/dev/null 2>&1
     fi
   else
     return 0
