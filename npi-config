@@ -214,7 +214,7 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.0.8)\n
+npi-config (v1.0.9)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
@@ -904,7 +904,7 @@ do_select_spi0dev() {
     spidev2_desc=${spidev2_desc}"(X)"
   fi
 
-  if [ ${2} = ${spidev0} -o ${2} = ${spidev1} -o ${2} = ${spidev2} ]; then
+  if [ "x${2}" = "x${spidev0}" -o "x${2}" = "x${spidev1}" -o "x${2}" = "x${spidev2}" ]; then
     selected_dev=${2}
   else
     selected_dev=$(whiptail --menu "Choose the spi0 device" 20 60 10 \
