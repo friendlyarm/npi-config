@@ -991,8 +991,7 @@ do_peripheral_status() {
     return 0
   fi
   if ! dpkg -s device-tree-compiler >/dev/null 2>&1; then
-    whiptail --msgbox "please apt-get install device-tree-compiler" 20 60 1
-    return 1
+    apt-get install -y device-tree-compiler
   fi
 
   local peripherals=$1
@@ -1039,13 +1038,19 @@ do_peripheral_status() {
     "${peripherals}0" "Enable/Disable ${peripherals}0[${i2s0_status}]" \
     3>&1 1>&2 2>&3)
     ;;
+  ir)
+    local ir_status=`do_get_dtb_status /boot/${DTB} ir status`
+    FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+    "${peripherals}" "Enable/Disable ${peripherals}[${ir_status}]" \
+    3>&1 1>&2 2>&3)
+    ;;
   esac
   RET=$?
   if [ $RET -eq 1 ]; then
     return 0
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
-      serial*|i2c*|spi*|pwm*|i2s*|pcm5102a*)
+      serial*|i2c*|spi*|pwm*|i2s*|pcm5102a*|ir*)
             whiptail --yesno "Enable/Disable ${FUN} module?\n" 20 60 2 \
                   --yes-button Enable --no-button Disable
 
@@ -1190,6 +1195,7 @@ do_advanced_menu() {
     "A5 SPI" "Enable/Disable SPI" \
     "A6 PWM" "Enable/Disable PWM" \
     "A7 I2S" "Enable/Disable I2S" \
+    "A8 IR" "Enable/Disable IR" \
     3>&1 1>&2 2>&3)
   RET=$?
   if [ $RET -eq 1 ]; then
@@ -1204,6 +1210,7 @@ do_advanced_menu() {
       A5\ *) do_peripheral_status spi ;;
       A6\ *) do_peripheral_status pwm ;;
       A7\ *) do_peripheral_status i2s ;;
+      A8\ *) do_peripheral_status ir ;;
       *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
     esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
   fi
