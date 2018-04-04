@@ -14,7 +14,8 @@ if [ -f /etc/friendlyelec-release ]; then
   . /etc/friendlyelec-release                       
 else
     echo "Not found /etc/friendlyelec-release, Unable to determine the board model."
-    return 1
+    echo "Unsupported OS.Please use FriendlyCore."
+    exit 1
 fi
 KERN_VERSION=`uname -r`
 BOARD_LC=$(echo $BOARD|tr '[:upper:]' '[:lower:]')
