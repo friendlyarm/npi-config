@@ -1095,7 +1095,7 @@ do_display() {
     fi
     cur_display=`cat /boot/boot.cmd | grep map | cut -d ":" -f 2`
     # only detected device need X-tag
-    if [ ! -z card_desc[${cur_display}] ]; then
+    if [ ! -z ${card_desc[${cur_display}]} ]; then
       card_desc[${cur_display}]=${card_desc[${cur_display}]}"(X)"
     fi
     # max display number: 5 
