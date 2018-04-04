@@ -362,12 +362,12 @@ do_qte() {
     --yes-button Enable --no-button Disable
   RET=$?
   if [ $RET -eq 0 ]; then
-    sed /etc/rc.local -i -e "s/^#\/opt\/QtE-Demo\/run.sh/\/opt\/QtE-Demo\/run.sh/g"
+    sed /etc/rc.local -i -e "s/^#\(.*\)\/opt\/QtE-Demo\/run.sh/\1\/opt\/QtE-Demo\/run.sh/g"
     rm /etc/systemd/system/getty.target.wants/getty@tty1.service
     ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty2.service
     whiptail --msgbox "Qt/E Demo enabled" 20 60 1
   elif [ $RET -eq 1 ]; then
-    sed /etc/rc.local -i -e "s/^\/opt\/QtE-Demo\/run.sh/#\/opt\/QtE-Demo\/run.sh/g"
+    sed /etc/rc.local -i -e "s/\(.*\)\/opt\/QtE-Demo\/run.sh/#\1\/opt\/QtE-Demo\/run.sh/g"
     rm /etc/systemd/system/getty.target.wants/getty@tty2.service
     ln -s /lib/systemd/system/getty@.service /etc/systemd/system/getty.target.wants/getty@tty1.service
     whiptail --msgbox "Qt/E Demo disabled" 20 60 1
@@ -581,11 +581,22 @@ do_boot_behaviour() {
   #  return 0
   # fi
   # "Qt/Embedded" "Graphical UI, display system info" \
-
+  B1_STATUS="disabled"
+  B2_STATUS="disabled"
+  B3_STATUS="disabled"
+  AUTOLOGIN_CONF=/etc/systemd/system/getty@tty1.service.d/autologin.conf
+  if grep autologin ${AUTOLOGIN_CONF}>/dev/null;  then
+    B2_STATUS="enabled"
+  else
+    B1_STATUS="enabled"
+  fi
+  if ! grep QtE-Demo /etc/rc.local | grep "#">/dev/null; then
+    B3_STATUS="enabled"
+  fi
   BOOTOPT=$(whiptail --menu "Chose boot option" 20 60 10 \
-      "B1 Console" "Text console, requiring user to login" \
-      "B2 Console Autologin" "Text console, automatically logged in as 'pi' user" \
-      "B3 Qt/Embedded" "Disable or enable Qt/E demo auto startup" \
+      "B1 Console" "Text console, requiring user to login[${B1_STATUS}]" \
+      "B2 Console Autologin" "Text console, automatically logged in as 'pi' user[${B2_STATUS}]" \
+      "B3 Qt/Embedded" "Disable or enable Qt/E demo auto startup[${B3_STATUS}]" \
     3>&1 1>&2 2>&3)
   if [ $? -eq 0 ]; then
     case "$BOOTOPT" in
