@@ -215,7 +215,7 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.1.0)\n
+npi-config (v1.1.1)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
@@ -1032,7 +1032,24 @@ do_peripheral_status() {
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
       serial*|i2c*|spi*|pwm*|i2s*|ir*)
-            whiptail --yesno "Enable/Disable ${FUN} module?\n" 20 60 2 \
+            if [ "x${FUN}" = "xpwm0" ]; then                          # serial0 / pwm0
+              warning="WARNING: Enable ${FUN} will disable serial0"
+            elif [ "x${FUN}" = "xserial0" ]; then
+              warning="WARNING: Enable ${FUN} will disable pwm0"
+            elif [ "x${FUN}" = "xi2c1" ]; then
+              warning="WARNING: Enable ${FUN} will disable i2s0"      # i2s0 / i2c1
+            elif [ "x${FUN}" = "xi2s0" ]; then
+              warning="WARNING: Enable ${FUN} will disable i2c1"
+            elif [ "x${FUN}" = "xserial2" ]; then
+              warning="WARNING: Enable ${FUN} will disable matrix-2.8-tft-lcd"   # serial / 2.8-tft
+            elif [ "x${FUN}" = "xserial3" ]; then                   # serial3 / spi1
+              warning="WARNING: Enable ${FUN} will disable spi1"
+            elif [ "x${FUN}" = "xspi1" ]; then
+              warning="WARNING: Enable ${FUN} will disable serial3"
+            else
+              warning=""
+            fi
+            whiptail --yesno "Enable/Disable ${FUN} module?\n${warning}" 20 60 2 \
                   --yes-button Enable --no-button Disable
 
             RET=$? 
