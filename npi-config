@@ -215,7 +215,7 @@ exit_apmode() {
 
 do_about() {
   whiptail --msgbox "\
-npi-config (v1.0.9)\n
+npi-config (v1.1.0)\n
 This tool provides a straight-forward way of doing initial
 configuration of the NanoPi. Although it can be run
 at any time, some of the options may have difficulties if
@@ -559,7 +559,7 @@ do_boot_device() {
     return 0
   fi
 
-  BOOTOPT=$(whiptail --menu "Chose boot device" 20 60 10 \
+  BOOTOPT=$(whiptail --menu "Choose boot device" 20 60 10 \
       "D1 Hard drive" "Load the root filesystem from SSD/HD/Usbdisk" \
       "D2 TF card" "Load the root filesystem from TF card" \
     3>&1 1>&2 2>&3)
@@ -626,15 +626,15 @@ do_audio() {
   for dev in `ls ${SOUND_DIR} | grep -E "card[0-9]"`; do
     local index=`echo ${dev} | grep -oE [0-9]`
     local card[${index}]=${dev}
-    local card_desc[${index}]=`cat ${SOUND_DIR}/${dev}/id`
-    if [ -z ${card_desc[${index}]} ]; then
+    local card_desc[${index}]=`aplay -l | grep "card ${index}" | head -n 1 | cut -d ":" -f 2-3 | cut -d " " -f 3- | cut -d "[" -f -2`
+    if [ -z "${card_desc[${index}]}" ]; then
       card_desc[${index}]="soundcard${index}"
     fi
     cardnum=$((cardnum + 1))
   done
   local selected_audio="unknown"
 
-  if [ -z $1 ]; then
+  if [ -z "$1" ]; then
     cur_audio="`grep -o "card [0-9]" /etc/asound.conf | head -n 1 | grep -o [0-9]`"
     card_desc[${cur_audio}]=${card_desc[${cur_audio}]}"(X)"
 
@@ -650,7 +650,6 @@ do_audio() {
     selected_audio=$1
   fi
 
-  echo ${selected_audio}
   if [ ! -z "${selected_audio}" ]; then
     if /usr/bin/select_audio.sh ${selected_audio} >/dev/null; then
       whiptail --msgbox "Select ${selected_audio} as system default audio device OK." 20 60 1
@@ -937,6 +936,13 @@ do_select_i2s0dev() {
     case ${selected_dev} in
     ${i2sdev0})
     fdtput --type s /boot/${DTB} pcm5102a status "okay" || whiptail --msgbox "Fail to enable ${i2sdev0}" 20 60 1
+    # card order must be:
+    # card0      Dummy               
+    # card1      Loopback            
+    # card2      Codec               
+    # card3      allwinnerhdmi
+    # card4      I2Smaster
+    do_audio card4
     ;;
     esac
   fi
@@ -1025,7 +1031,7 @@ do_peripheral_status() {
     return 0
   elif [ $RET -eq 0 ]; then
     case "$FUN" in
-      serial*|i2c*|spi*|pwm*|i2s*|pcm5102a*|ir*)
+      serial*|i2c*|spi*|pwm*|i2s*|ir*)
             whiptail --yesno "Enable/Disable ${FUN} module?\n" 20 60 2 \
                   --yes-button Enable --no-button Disable
 
@@ -1057,6 +1063,10 @@ do_peripheral_status() {
                 fi
             else
                 fdtput --type s /boot/${DTB} ${FUN} status "disabled" || whiptail --msgbox "Fail to disable $FUN" 20 60 1
+                if [ "x${FUN}" = "xi2s0" ]; then
+                  # card2: internal codec
+                  do_audio card2
+                fi
             fi
             ASK_TO_REBOOT=1
             sync
@@ -1080,7 +1090,7 @@ do_display() {
     local index=`echo ${fb} | grep -oE [0-9]`
     local card[${index}]=${fb}
     local card_desc[${index}]=`cat ${GRAPHICS_DIR}/${fb}/name`
-    if [ -z ${card_desc[${index}]} ]; then
+    if [ -z "${card_desc[${index}]}" ]; then
       card_desc[${index}]="framebuffer${index}"
     fi
     cardnum=$((cardnum + 1))
@@ -1089,14 +1099,14 @@ do_display() {
   local selected_disp="unknown"
   local tty_dev=0
   # print and select display device
-  if [ -z $1 ]; then
+  if [ -z "$1" ]; then
     if [ ${cardnum} -eq 0 ]; then
       whiptail --msgbox "No display device found.Please connect HDMI or enable Matrix-2.8 SPI Key TFT and reboot" 20 60 2
       return 0
     fi
     cur_display=`cat /boot/boot.cmd | grep map | cut -d ":" -f 2`
     # only detected device need X-tag
-    if [ ! -z ${card_desc[${cur_display}]} ]; then
+    if [ ! -z "${card_desc[${cur_display}]}" ]; then
       card_desc[${cur_display}]=${card_desc[${cur_display}]}"(X)"
     fi
     # max display number: 5 
@@ -1111,7 +1121,7 @@ do_display() {
     selected_disp=$1
   fi
 
-  if [ ! -z ${selected_disp} ]; then
+  if [ ! -z "${selected_disp}" ]; then
     if /usr/bin/select_display.sh ${selected_disp} >/dev/null; then
       whiptail --msgbox "Select ${selected_disp} as system default display device OK. Please reboot" 20 60 1
       ASK_TO_REBOOT=1
