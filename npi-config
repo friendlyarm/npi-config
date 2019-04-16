@@ -944,7 +944,7 @@ do_select_spi0dev() {
       fdtput --type s /boot/${DTB} pitft_ts status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
       fdtput --type s /boot/${DTB} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
       fdtput --type s /boot/${DTB} serial2 status "disabled" || whiptail --msgbox "Fail to disable ${serial2}" 20 60 1
-      do_display fb-st7789s
+      do_display fb_st7789s
     fi
     ;;
     ${spidev2})
@@ -1124,7 +1124,7 @@ do_display() {
     return 0
   fi
 
-  # collect all display device. hdmi/lcd must be fb0 and 2.8-tft must be fb1/fb-st7789s.
+  # collect all display device. hdmi/lcd must be fb0 and 2.8-tft must be fb1/fb_st7789s.
   local cardnum=0
   GRAPHICS_DIR=/sys/class/graphics/
   for fb in `ls ${GRAPHICS_DIR} | grep -E "fb[0-9]"`; do
@@ -1163,7 +1163,7 @@ do_display() {
     selected_disp=$1
     # display already enabled 
     if [ "x${selected_disp}" = "xfb0" -a "x${cur_display}" = "x0" ] \
-      || [ "x${selected_disp}" = "xfb-st7789s" -a "x${cur_display}" = "x1" ] \
+      || [ "x${selected_disp}" = "xfb_st7789s" -a "x${cur_display}" = "x1" ] \
       || [ "x${selected_disp}" = "xfb1" -a "x${cur_display}" = "x1" ]; then
       return 0
     fi
