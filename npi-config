@@ -20,16 +20,17 @@ fi
 KERN_VERSION=`uname -r`
 BOARD_LC=$(echo $BOARD|tr '[:upper:]' '[:lower:]')
 DTB="none"
+DTB_R=/sys/firmware/fdt
 is_allwinner_mainline_kernel() {
   IS_ALLWINNER_M=0
   if [ "x${LINUXFAMILY}" = "xAllwinnersun50iw2Family" ]; then
     IS_ALLWINNER_M=1
-    DTB=sun50i-h5-${BOARD_LC}.dtb
+    DTB_W=/boot/sun50i-h5-${BOARD_LC}.dtb
   elif [ "x${LINUXFAMILY}" = "xsun8i" ]; then
     IS_ALLWINNER_M=1
-    DTB=sun8i-h3-${BOARD_LC}.dtb
+    DTB_W=/boot/sun8i-h3-${BOARD_LC}.dtb
     if [ "x${BOARD_LC}" = "xnanopi-duo" ]; then
-      DTB=sun8i-h2-plus-${BOARD_LC}.dtb
+      DTB_W=/boot/sun8i-h2-plus-${BOARD_LC}.dtb
     fi
   else
     return 1
@@ -678,7 +679,7 @@ do_cpu_freq() {
   fi
   freq_desc[1]="1008MHz"
   freq_desc[2]="1200MHz"
-  cur_freq=`fdtget /boot/${DTB} /cpus/cpu@0 operating-points | cut -d " " -f 1`
+  cur_freq=`fdtget ${DTB_R} /cpus/cpu@0 operating-points | cut -d " " -f 1`
   if [ "x${cur_freq}" = "x1008000" ];then
     freq_desc[1]="1008MHz(X)"
   else
@@ -692,8 +693,8 @@ do_cpu_freq() {
     ASK_TO_REBOOT=1
   fi
   case ${selected_freq} in
-      "1") fdtput /boot/${DTB} /cpus/cpu@0 operating-points 1008000 1300000 816000 1100000 624000 1100000 480000 1100000 312000 1100000 240000 1100000 120000 1100000] ;;
-      "2") fdtput /boot/${DTB} /cpus/cpu@0 operating-points 1200000 1300000 816000 1100000 624000 1100000 480000 1100000 312000 1100000 240000 1100000 120000 1100000] ;;
+      "1") fdtput ${DTB_W} /cpus/cpu@0 operating-points 1008000 1300000 816000 1100000 624000 1100000 480000 1100000 312000 1100000 240000 1100000 120000 1100000] ;;
+      "2") fdtput ${DTB_W} /cpus/cpu@0 operating-points 1200000 1300000 816000 1100000 624000 1100000 480000 1100000 312000 1100000 240000 1100000 120000 1100000] ;;
       *)
         return 0
         ;;
@@ -883,9 +884,8 @@ do_welcome_message() {
 }
 
 do_get_dtb_status() {
-  local DTB=$1
-  local NODE=$2
-  RET=`fdtget ${DTB} ${NODE} status`
+  local NODE=$1
+  RET=`fdtget ${DTB_R} ${NODE} status`
   if [ "x${RET}" = "xokay" ]; then
     echo "enabled"
   else
@@ -894,7 +894,6 @@ do_get_dtb_status() {
 }
 
 do_select_spi0dev() {
-  local DTB=${1}
   local spidev0="spidev0.0"
   local spidev1="spi-2.8'tft"
   local spidev2="spi-flash"
@@ -902,9 +901,9 @@ do_select_spi0dev() {
   local spidev1_desc="Matrix-2'8_SPI_Key_TFT"
   local spidev2_desc="SPI0 flash"
   local selected_dev="spidev0.0"  
-  local spidev0_status=`do_get_dtb_status /boot/${DTB} spidev0 status`
-  local spidev1_status=`do_get_dtb_status /boot/${DTB} pitft status`
-  local spidev2_status=`do_get_dtb_status /boot/${DTB} spiflash status`
+  local spidev0_status=`do_get_dtb_status spidev0 status`
+  local spidev1_status=`do_get_dtb_status pitft status`
+  local spidev2_status=`do_get_dtb_status spiflash status`
 
   if [ "x${spidev0_status}" = "xenabled" ];then
     spidev0_desc=${spidev0_desc}"(X)"
@@ -914,8 +913,8 @@ do_select_spi0dev() {
     spidev2_desc=${spidev2_desc}"(X)"
   fi
 
-  if [ "x${2}" = "x${spidev0}" -o "x${2}" = "x${spidev1}" -o "x${2}" = "x${spidev2}" ]; then
-    selected_dev=${2}
+  if [ "x${1}" = "x${spidev0}" -o "x${1}" = "x${spidev1}" -o "x${1}" = "x${spidev2}" ]; then
+    selected_dev=${1}
   else
     selected_dev=$(whiptail --menu "Choose the spi0 device" 20 60 10 \
     "${spidev0}" "${spidev0_desc}" \
@@ -927,10 +926,10 @@ do_select_spi0dev() {
   if [ $? -eq 0 ]; then
     case ${selected_dev} in
     ${spidev0})
-    fdtput --type s /boot/${DTB} spidev0 status "okay" || whiptail --msgbox "Fail to enable ${spidev0}" 20 60 1
-    fdtput --type s /boot/${DTB} pitft status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
-    fdtput --type s /boot/${DTB} pitft_ts status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
-    fdtput --type s /boot/${DTB} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
+    fdtput --type s ${DTB_W} spidev0 status "okay" || whiptail --msgbox "Fail to enable ${spidev0}" 20 60 1
+    fdtput --type s ${DTB_W} pitft status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s ${DTB_W} pitft_ts status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s ${DTB_W} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
     do_display fb0
     ;;
     ${spidev1})
@@ -939,19 +938,19 @@ do_select_spi0dev() {
                   --yes-button Enable --no-button Disable
     RET=$? 
     if [ $RET -eq 0 ]; then
-      fdtput --type s /boot/${DTB} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
-      fdtput --type s /boot/${DTB} pitft status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
-      fdtput --type s /boot/${DTB} pitft_ts status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
-      fdtput --type s /boot/${DTB} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
-      fdtput --type s /boot/${DTB} serial2 status "disabled" || whiptail --msgbox "Fail to disable ${serial2}" 20 60 1
+      fdtput --type s ${DTB_W} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
+      fdtput --type s ${DTB_W} pitft status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
+      fdtput --type s ${DTB_W} pitft_ts status "okay" || whiptail --msgbox "Fail to enable ${spidev1}" 20 60 1
+      fdtput --type s ${DTB_W} spiflash status "disabled" || whiptail --msgbox "Fail to disable ${spidev2}" 20 60 1
+      fdtput --type s ${DTB_W} serial2 status "disabled" || whiptail --msgbox "Fail to disable ${serial2}" 20 60 1
       do_display fb_st7789s
     fi
     ;;
     ${spidev2})
-    fdtput --type s /boot/${DTB} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
-    fdtput --type s /boot/${DTB} pitft status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
-    fdtput --type s /boot/${DTB} pitft_ts status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
-    fdtput --type s /boot/${DTB} spiflash status "okay" || whiptail --msgbox "Fail to enable ${spidev2}" 20 60 1
+    fdtput --type s ${DTB_W} spidev0 status "disabled" || whiptail --msgbox "Fail to disable ${spidev0}" 20 60 1
+    fdtput --type s ${DTB_W} pitft status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s ${DTB_W} pitft_ts status "disabled" || whiptail --msgbox "Fail to disable ${spidev1}" 20 60 1
+    fdtput --type s ${DTB_W} spiflash status "okay" || whiptail --msgbox "Fail to enable ${spidev2}" 20 60 1
     do_display fb0
     ;;
     esac
@@ -959,11 +958,10 @@ do_select_spi0dev() {
 }
 
 do_select_i2s0dev() {
-  local DTB=${1}
   local selected_dev="pcm5102a"  
   local i2sdev0="pcm5102a"
   local i2sdev0_desc="NanoHat PCM5102A"
-  local i2sdev0_status=`do_get_dtb_status /boot/${DTB} pcm5102a status`
+  local i2sdev0_status=`do_get_dtb_status pcm5102a status`
   
   if [ "x${i2sdev0_status}" = "xenabled" ];then
     i2sdev0_desc=${spidev0_desc}"(X)"
@@ -976,7 +974,7 @@ do_select_i2s0dev() {
   if [ $? -eq 0 ]; then
     case ${selected_dev} in
     ${i2sdev0})
-    fdtput --type s /boot/${DTB} pcm5102a status "okay" || whiptail --msgbox "Fail to enable ${i2sdev0}" 20 60 1
+    fdtput --type s ${DTB_W} pcm5102a status "okay" || whiptail --msgbox "Fail to enable ${i2sdev0}" 20 60 1
     # card order must be:
     # card0      Dummy               
     # card1      Loopback            
@@ -1002,10 +1000,10 @@ do_peripheral_status() {
   local peripherals=$1
   case ${peripherals} in
   serial)
-    local serial0_status=`do_get_dtb_status /boot/${DTB} serial0 status`
-    local serial1_status=`do_get_dtb_status /boot/${DTB} serial1 status`
-    local serial2_status=`do_get_dtb_status /boot/${DTB} serial2 status`
-    local serial3_status=`do_get_dtb_status /boot/${DTB} serial3 status`
+    local serial0_status=`do_get_dtb_status serial0 status`
+    local serial1_status=`do_get_dtb_status serial1 status`
+    local serial2_status=`do_get_dtb_status serial2 status`
+    local serial3_status=`do_get_dtb_status serial3 status`
     FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "${peripherals}0" "Enable/Disable ${peripherals}0[${serial0_status}]" \
     "${peripherals}1" "Enable/Disable ${peripherals}1[${serial1_status}]" \
@@ -1014,9 +1012,9 @@ do_peripheral_status() {
     3>&1 1>&2 2>&3)
     ;;
   i2c)
-    local i2c0_status=`do_get_dtb_status /boot/${DTB} i2c0 status`
-    local i2c1_status=`do_get_dtb_status /boot/${DTB} i2c1 status`
-    local i2c2_status=`do_get_dtb_status /boot/${DTB} i2c2 status`
+    local i2c0_status=`do_get_dtb_status i2c0 status`
+    local i2c1_status=`do_get_dtb_status i2c1 status`
+    local i2c2_status=`do_get_dtb_status i2c2 status`
     FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "${peripherals}0" "Enable/Disable ${peripherals}0[${i2c0_status}]" \
     "${peripherals}1" "Enable/Disable ${peripherals}1[${i2c1_status}]" \
@@ -1024,27 +1022,27 @@ do_peripheral_status() {
     3>&1 1>&2 2>&3)
     ;;
   spi)
-    local spi0_status=`do_get_dtb_status /boot/${DTB} spi0 status`
-    local spi1_status=`do_get_dtb_status /boot/${DTB} spi1 status`
+    local spi0_status=`do_get_dtb_status spi0 status`
+    local spi1_status=`do_get_dtb_status spi1 status`
     FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "${peripherals}0" "Enable/Disable ${peripherals}0[${spi0_status}]" \
     "${peripherals}1" "Enable/Disable ${peripherals}1[${spi1_status}]" \
     3>&1 1>&2 2>&3)
     ;;
   pwm)
-    local pwm0_status=`do_get_dtb_status /boot/${DTB} pwm0 status`
+    local pwm0_status=`do_get_dtb_status pwm0 status`
     FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "${peripherals}0" "Enable/Disable ${peripherals}0[${pwm0_status}]" \
     3>&1 1>&2 2>&3)
     ;;
   i2s)
-    local i2s0_status=`do_get_dtb_status /boot/${DTB} i2s0 status`
+    local i2s0_status=`do_get_dtb_status i2s0 status`
     FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "${peripherals}0" "Enable/Disable ${peripherals}0[${i2s0_status}]" \
     3>&1 1>&2 2>&3)
     ;;
   ir)
-    local ir_status=`do_get_dtb_status /boot/${DTB} ir status`
+    local ir_status=`do_get_dtb_status ir status`
     FUN=$(whiptail --title "NanoPi Software Configuration Tool (npi-config)" --menu "Advanced Peripherals Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "${peripherals}" "Enable/Disable ${peripherals}[${ir_status}]" \
     3>&1 1>&2 2>&3)
@@ -1078,32 +1076,32 @@ do_peripheral_status() {
 
             RET=$? 
             if [ $RET -eq 0 ]; then
-                fdtput --type s /boot/${DTB} ${FUN} status "okay" || whiptail --msgbox "Fail to enable $FUN" 20 60 1
+                fdtput --type s ${DTB_W} ${FUN} status "okay" || whiptail --msgbox "Fail to enable $FUN" 20 60 1
                 if [ "x${FUN}" = "xserial0" ]; then           # serial0 & pwm0 share PA5
-                  fdtput --type s /boot/${DTB} pwm0 status "disabled" || whiptail --msgbox "Fail to disable pwm0" 20 60 1
+                  fdtput --type s ${DTB_W} pwm0 status "disabled" || whiptail --msgbox "Fail to disable pwm0" 20 60 1
                   sed -i 's/tty0/ttyS0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
                 elif [ "x${FUN}" = "xpwm0" ]; then
-                  fdtput --type s /boot/${DTB} serial0 status "disabled" || whiptail --msgbox "Fail to disable serial0" 20 60 1
+                  fdtput --type s ${DTB_W} serial0 status "disabled" || whiptail --msgbox "Fail to disable serial0" 20 60 1
                   sed -i 's/ttyS0/tty0/g' /boot/boot.cmd && mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr >/dev/null 2>&1
                 elif [ "x${FUN}" = "xi2c1" ]; then            # i2c1 & i2s0 share same pin.
-                  fdtput --type s /boot/${DTB} i2s0 status "disabled" || whiptail --msgbox "Fail to disable i2s0" 20 60 1
+                  fdtput --type s ${DTB_W} i2s0 status "disabled" || whiptail --msgbox "Fail to disable i2s0" 20 60 1
                 elif [ "x${FUN}" = "xi2s0" ]; then
-                  fdtput --type s /boot/${DTB} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
-                  do_select_i2s0dev ${DTB}
+                  fdtput --type s ${DTB_W} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
+                  do_select_i2s0dev
                 elif [ "x${FUN}" = "xpcm5102a" ]; then
-                  fdtput --type s /boot/${DTB} i2s0 status "okay" || whiptail --msgbox "Fail to enable i2s0" 20 60 1
-                  fdtput --type s /boot/${DTB} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
+                  fdtput --type s ${DTB_W} i2s0 status "okay" || whiptail --msgbox "Fail to enable i2s0" 20 60 1
+                  fdtput --type s ${DTB_W} i2c1 status "disabled" || whiptail --msgbox "Fail to disable i2c1" 20 60 1
                 elif [ "x${FUN}" = "xspi0" ]; then
-                  do_select_spi0dev ${DTB}
+                  do_select_spi0dev
                 elif [ "x${FUN}" = "xserial2" ]; then         # serial2 & 2.8-tft share PA1
-                  do_select_spi0dev ${DTB} "spidev0.0"
+                  do_select_spi0dev "spidev0.0"
                 elif [ "x${FUN}" = "xserial3" ]; then            # serial3 & spi1 share same pin
-                  fdtput --type s /boot/${DTB} spi1 status "disabled" || whiptail --msgbox "Fail to disable spi1" 20 60 1
+                  fdtput --type s ${DTB_W} spi1 status "disabled" || whiptail --msgbox "Fail to disable spi1" 20 60 1
                 elif [ "x${FUN}" = "xspi1" ]; then
-                  fdtput --type s /boot/${DTB} serial3 status "disabled" || whiptail --msgbox "Fail to disable serial3" 20 60 1
+                  fdtput --type s ${DTB_W} serial3 status "disabled" || whiptail --msgbox "Fail to disable serial3" 20 60 1
                 fi
             else
-                fdtput --type s /boot/${DTB} ${FUN} status "disabled" || whiptail --msgbox "Fail to disable $FUN" 20 60 1
+                fdtput --type s ${DTB_W} ${FUN} status "disabled" || whiptail --msgbox "Fail to disable $FUN" 20 60 1
                 if [ "x${FUN}" = "xi2s0" ]; then
                   # card2: internal codec
                   do_audio card2
